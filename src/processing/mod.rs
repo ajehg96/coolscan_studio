@@ -1,7 +1,12 @@
+pub mod analysis;
 pub mod color;
 pub mod negadoctor;
 pub mod roll;
 
+pub use analysis::{
+    analyse_pre_white_balance, finish_after_white_balance, sample_highlight_wb, sample_shadow_wb,
+    ImageSampleStats, SampleRect, TechnicalAnalysis, WorkingImage,
+};
 pub use color::{
     ColorError, ColorTransform, IdentityColorTransform, ScannerColorPipeline, WorkingColorSpace,
     DEFAULT_LS40_ICC_BYTES,
@@ -12,5 +17,6 @@ pub use negadoctor::{
     THRESHOLD as NEGADOCTOR_THRESHOLD,
 };
 pub use roll::{PreparedFrame, RollId, RollProfile, RollProfileError, ScannerProfile};
+
 
 
