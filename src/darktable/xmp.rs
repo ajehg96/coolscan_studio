@@ -391,6 +391,13 @@ pub struct DarktableHistoryItem {
     pub blendop_params: String,
 }
 
+impl DarktableHistoryItem {
+    /// Decodes the params string (either gz-deflated base64 or hex) into raw bytes.
+    pub fn decode_params(&self) -> Result<Vec<u8>, DarktableError> {
+        DarktableParamCodec::decode_param(&self.params)
+    }
+}
+
 /// Darktable XMP sidecar document representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DarktableXmp {
@@ -547,6 +554,21 @@ impl DarktableXmp {
             history_basic_hash: None,
             history_current_hash: None,
         })
+    }
+
+    /// Returns true if any history entry matches the given operation name.
+    pub fn has_operation(&self, operation: &str) -> bool {
+        self.history.iter().any(|h| h.operation == operation)
+    }
+
+    /// Finds the first history entry with the specified operation name.
+    pub fn find_operation(&self, operation: &str) -> Option<&DarktableHistoryItem> {
+        self.history.iter().find(|h| h.operation == operation)
+    }
+
+    /// Finds the last history entry with the specified operation name.
+    pub fn find_last_operation(&self, operation: &str) -> Option<&DarktableHistoryItem> {
+        self.history.iter().rfind(|h| h.operation == operation)
     }
 
     /// Serializes this document to Darktable XMP XML.

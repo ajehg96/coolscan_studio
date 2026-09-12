@@ -187,6 +187,21 @@ impl Orientation {
         }
     }
 
+    /// Reconstructs an Orientation from Darktable flip module binary parameter bytes.
+    pub fn from_darktable_flip_params(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < 4 {
+            return None;
+        }
+        let code = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        match code {
+            0 => Some(Orientation::Normal),
+            6 => Some(Orientation::Rotate90),
+            3 => Some(Orientation::Rotate180),
+            5 => Some(Orientation::Rotate270),
+            _ => None,
+        }
+    }
+
     /// Renders an oriented copy of a `WorkingImage` for preview display.
     pub fn render_oriented_image(self, image: &WorkingImage) -> WorkingImage {
         let (pw, ph) = self.preview_dimensions(image.width, image.height);

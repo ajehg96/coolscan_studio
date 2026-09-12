@@ -71,6 +71,8 @@ pub struct ReviewFrameState {
     pub selection_status: SelectionStatus,
     /// Whether the user has accepted this frame.
     pub accepted: bool,
+    /// Original scanner frame artifact if retained.
+    pub source_artifact: Option<crate::scanner::types::FrameArtifact>,
     /// Cached display sRGB RGBA8 pixels and preview dimensions.
     cached_preview: Option<(usize, usize, Vec<u8>)>,
 }
@@ -97,8 +99,14 @@ impl ReviewFrameState {
             highlight_wb_rect: None,
             selection_status: SelectionStatus::None,
             accepted: false,
+            source_artifact: None,
             cached_preview: None,
         }
+    }
+
+    pub fn with_artifact(mut self, artifact: crate::scanner::types::FrameArtifact) -> Self {
+        self.source_artifact = Some(artifact);
+        self
     }
 
     /// Sets the orientation and invalidates the cached preview.
@@ -283,7 +291,6 @@ impl ReviewSession {
                 &color_pipeline,
             )?;
             let mut frame_state = ReviewFrameState::new(
-
                 i + 1,
                 working_image,
                 &p.roll,
@@ -291,10 +298,41 @@ impl ReviewSession {
             );
             frame_state.orientation = p.orientation;
             frame_state.params = p.params;
+            frame_state.source_artifact = Some(p.source);
             frames.push(frame_state);
         }
 
         Ok(Self::new(frames, roll, color_pipeline))
+    }
+
+    /// Creates an empty review session ready to receive scanned frames dynamically.
+    pub fn empty(roll: RollProfile, color_pipeline: ScannerColorPipeline) -> Self {
+        Self::new(Vec::new(), roll, color_pipeline)
+    }
+
+    /// Appends a newly scanned prepared frame to this review session.
+    pub fn add_prepared_frame(&mut self, p: PreparedFrame) -> Result<usize, ColorError> {
+        let effective = p
+            .source
+            .get_effective_image()
+            .map_err(|e| ColorError::Lcms(e.to_string()))?;
+        let working_image = WorkingImage::from_scanner_samples(
+            effective.samples(),
+            effective.pass(),
+            &self.color_pipeline,
+        )?;
+        let frame_num = self.frames.len() + 1;
+        let mut frame_state = ReviewFrameState::new(
+            frame_num,
+            working_image,
+            &p.roll,
+            p.technical,
+        );
+        frame_state.orientation = p.orientation;
+        frame_state.params = p.params;
+        frame_state.source_artifact = Some(p.source);
+        self.frames.push(frame_state);
+        Ok(self.frames.len() - 1)
     }
 
     /// Number of frames in the session.
@@ -451,6 +489,33 @@ impl ReviewSession {
         let path = output_dir.join(format!("frame-{}.tif.xmp", frame.frame_number));
         xmp.write_to_file(&path)?;
         Ok(path)
+    }
+
+    /// Saves both the TIFF image (cropped if applicable) and the Darktable XMP sidecar.
+    pub fn save_current_frame_and_xmp(
+        &self,
+        output_dir: &std::path::Path,
+    ) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+        let frame = self.current_frame().ok_or_else(|| "No active frame".to_string())?;
+        if !output_dir.exists() {
+            std::fs::create_dir_all(output_dir).map_err(|e| e.to_string())?;
+        }
+        let tiff_path = output_dir.join(format!("frame-{}.tif", frame.frame_number));
+
+        // Save TIFF if source artifact is present
+        if let Some(artifact) = &frame.source_artifact {
+            let effective = artifact.get_effective_image().map_err(|e| e.to_string())?;
+            let path_str = tiff_path.to_str().ok_or("Invalid TIFF path string")?;
+            crate::tiff::write_tiff(path_str, effective.samples(), effective.pass(), artifact.dpi)
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Save Darktable XMP sidecar
+        let xmp_path = self
+            .save_current_xmp(output_dir)
+            .map_err(|e| e.to_string())?;
+
+        Ok((tiff_path, xmp_path))
     }
 }
 

@@ -13,9 +13,14 @@ use egui::{
     TextureOptions, Ui,
 };
 
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
 use super::review::{ReviewSession, SelectionStatus};
 use crate::processing::analysis::SampleRect;
 use crate::processing::orientation::OrientationScope;
+use crate::scanner::types::{FrameSelection, ScanEvent, ScanRequest};
+use crate::scanner::worker::{ScanCommand, ScannerWorkerHandle, WorkerMessage};
 
 /// The desktop review application state.
 pub struct ReviewApp {
@@ -29,6 +34,18 @@ pub struct ReviewApp {
     drag_current: Option<Pos2>,
     /// Image display rectangle on canvas during the last frame paint.
     last_image_rect: Option<Rect>,
+    /// Optional background scanner worker handle.
+    pub worker: Option<ScannerWorkerHandle>,
+    /// Whether a scan operation is currently running.
+    pub is_scanning: bool,
+    /// Current scan progress fraction in [0.0, 1.0].
+    pub scan_progress: f32,
+    /// Live scanner status message.
+    pub status_message: String,
+    /// Destination directory for saving TIFF and XMP sidecar files.
+    pub output_dir: PathBuf,
+    /// Timestamped save confirmation notification.
+    pub save_notification: Option<(String, Instant)>,
 }
 
 impl ReviewApp {
@@ -40,7 +57,25 @@ impl ReviewApp {
             drag_start: None,
             drag_current: None,
             last_image_rect: None,
+            worker: None,
+            is_scanning: false,
+            scan_progress: 0.0,
+            status_message: "Ready".into(),
+            output_dir: PathBuf::from("./scans"),
+            save_notification: None,
         }
+    }
+
+    /// Associates a background scanner worker with this review application.
+    pub fn with_worker(mut self, worker: ScannerWorkerHandle) -> Self {
+        self.worker = Some(worker);
+        self
+    }
+
+    /// Configures the output directory for TIFF and XMP sidecar exports.
+    pub fn with_output_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.output_dir = path.into();
+        self
     }
 
     /// Forces regeneration of the preview texture (e.g. after parameter or orientation change).
@@ -50,11 +85,105 @@ impl ReviewApp {
         }
         self.preview_texture = None;
     }
+
+    /// Polls messages from the background scanner worker and updates session state.
+    pub fn poll_worker(&mut self) {
+        let messages: Vec<WorkerMessage> = if let Some(worker) = &self.worker {
+            let mut msgs = Vec::new();
+            while let Some(msg) = worker.try_recv() {
+                msgs.push(msg);
+            }
+            msgs
+        } else {
+            Vec::new()
+        };
+
+        for msg in messages {
+            match msg {
+                WorkerMessage::Event(evt) => {
+                    match &evt {
+                        ScanEvent::ScannerFound { description } => {
+                            self.status_message = format!("Scanner: {description}");
+                        }
+                        ScanEvent::SessionReady => {
+                            self.status_message = "Scanner ready".into();
+                        }
+                        ScanEvent::MediaChecked { loaded } => {
+                            self.status_message = if *loaded {
+                                "Film loaded".into()
+                            } else {
+                                "No film loaded".into()
+                            };
+                        }
+                        ScanEvent::DiscoveryStarted { .. } => {
+                            self.status_message = "Discovering strip boundaries...".into();
+                        }
+                        ScanEvent::DiscoveryCompleted { detected_count } => {
+                            self.status_message = format!("Discovered {detected_count} frames on strip");
+                        }
+                        ScanEvent::FrameStarted {
+                            frame_number,
+                            total_frames,
+                            dpi,
+                            ..
+                        } => {
+                            self.status_message =
+                                format!("Scanning Frame {frame_number} of {total_frames} ({dpi} DPI)...");
+                            self.scan_progress = 0.0;
+                            self.is_scanning = true;
+                        }
+                        ScanEvent::Progress { percent, .. } => {
+                            self.scan_progress = (*percent as f32 / 100.0).clamp(0.0, 1.0);
+                        }
+                        ScanEvent::FrameCompleted {
+                            frame_number,
+                        } => {
+                            self.status_message =
+                                format!("Frame {frame_number} acquired");
+                            self.scan_progress = 1.0;
+                        }
+                        _ => {}
+                    }
+                }
+                WorkerMessage::FrameReady(prepared) => {
+                    let was_empty = self.session.frames.is_empty();
+                    let _ = self.session.add_prepared_frame(*prepared);
+                    if was_empty {
+                        self.session.current_index = 0;
+                        self.invalidate_texture();
+                    }
+                }
+                WorkerMessage::DiscoveryReady(discovery) => {
+                    self.status_message =
+                        format!("Discovered {} frames", discovery.frames().len());
+                }
+                WorkerMessage::StripScanComplete => {
+                    self.is_scanning = false;
+                    self.status_message = "Scan complete — ready for review".into();
+                }
+                WorkerMessage::ScanCancelled { reason } => {
+                    self.is_scanning = false;
+                    self.status_message = format!("Scan stopped: {reason}");
+                }
+                WorkerMessage::FilmEjected => {
+                    self.status_message = "Film ejected".into();
+                    self.is_scanning = false;
+                }
+                WorkerMessage::Error(err) => {
+                    self.status_message = format!("Scanner error: {err}");
+                    self.is_scanning = false;
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for ReviewApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+
+        // Process incoming background scanner messages
+        self.poll_worker();
 
         // Handle keyboard navigation shortcuts
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
@@ -110,6 +239,46 @@ impl eframe::App for ReviewApp {
                     &self.session.roll.film_stock,
                 );
 
+                // Scanner Worker Live Controls
+                if let Some(worker) = &self.worker {
+                    ui.separator();
+                    if self.is_scanning {
+                        if ui
+                            .button(
+                                RichText::new("⏹ Cancel Frame")
+                                    .color(Color32::from_rgb(255, 120, 120)),
+                            )
+                            .clicked()
+                        {
+                            worker.cancel_current();
+                        }
+                        if ui.button("⏸ Stop After Frame").clicked() {
+                            worker.stop_after_current();
+                        }
+                    } else {
+                        if ui
+                            .button(
+                                RichText::new("▶ Scan Strip")
+                                    .color(Color32::from_rgb(120, 240, 120)),
+                            )
+                            .clicked()
+                        {
+                            let req =
+                                ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
+                            worker.send(ScanCommand::StartScan(req));
+                            self.is_scanning = true;
+                            self.status_message = "Starting scan...".into();
+                        }
+                        if ui.button("🔍 Discover").clicked() {
+                            worker.send(ScanCommand::DiscoverStrip);
+                            self.status_message = "Discovering strip...".into();
+                        }
+                        if ui.button("⏏ Eject").clicked() {
+                            worker.eject();
+                        }
+                    }
+                }
+
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let Some(frame) = self.session.current_frame() {
                         if frame.accepted {
@@ -120,6 +289,32 @@ impl eframe::App for ReviewApp {
                     }
                 });
             });
+
+            // Live status text and scan progress bar
+            if self.is_scanning || !self.status_message.is_empty() {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if self.is_scanning {
+                        ui.add(egui::ProgressBar::new(self.scan_progress).desired_width(140.0));
+                    }
+                    ui.label(
+                        RichText::new(&self.status_message)
+                            .size(12.0)
+                            .color(Color32::from_rgb(200, 200, 200)),
+                    );
+
+                    if let Some((notification, inst)) = &self.save_notification {
+                        if inst.elapsed() < Duration::from_secs(4) {
+                            ui.separator();
+                            ui.colored_label(
+                                Color32::from_rgb(100, 255, 100),
+                                format!("✓ {notification}"),
+                            );
+                        }
+                    }
+                });
+            }
+
             ui.add_space(6.0);
         });
 
@@ -173,6 +368,27 @@ impl eframe::App for ReviewApp {
                         .fill(Color32::from_rgb(40, 140, 60));
 
                     if ui.add(accept_btn).clicked() {
+                        let frame_num = self
+                            .session
+                            .current_frame()
+                            .map(|f| f.frame_number)
+                            .unwrap_or(0);
+                        match self.session.save_current_frame_and_xmp(&self.output_dir) {
+                            Ok((tif, _xmp)) => {
+                                let filename = tif
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| format!("frame-{frame_num}.tif"));
+                                self.save_notification = Some((
+                                    format!("Saved {filename} + Darktable XMP"),
+                                    Instant::now(),
+                                ));
+                            }
+                            Err(err) => {
+                                self.save_notification =
+                                    Some((format!("Save failed: {err}"), Instant::now()));
+                            }
+                        }
                         self.session.accept_and_next();
                         self.preview_texture = None;
                     }
@@ -345,7 +561,25 @@ impl ReviewApp {
 
         let Some(frame) = self.session.frames.get_mut(current_index) else {
             ui.centered_and_justified(|ui| {
-                ui.label("No frames loaded");
+                if self.is_scanning {
+                    ui.vertical_centered(|ui| {
+                        ui.spinner();
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(&self.status_message).size(16.0));
+                        ui.add_space(8.0);
+                        ui.add(egui::ProgressBar::new(self.scan_progress).desired_width(220.0));
+                    });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("No frames loaded").size(16.0));
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Click '▶ Scan Strip' above to acquire frames.")
+                                .size(12.0)
+                                .color(Color32::from_rgb(160, 160, 160)),
+                        );
+                    });
+                }
             });
             return;
         };
