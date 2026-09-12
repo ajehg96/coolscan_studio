@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod color;
 pub mod negadoctor;
+pub mod orientation;
 pub mod roll;
 
 pub use analysis::{
@@ -16,7 +17,9 @@ pub use negadoctor::{
     auto_shadow_wb, render_positive, NegadoctorError, NegadoctorParams, PreparedNegadoctor,
     THRESHOLD as NEGADOCTOR_THRESHOLD,
 };
+pub use orientation::{Orientation, OrientationScope};
 pub use roll::{PreparedFrame, RollId, RollProfile, RollProfileError, ScannerProfile};
+
 
 
 
