@@ -1,7 +1,15 @@
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
+use super::analysis::{
+    analyse_pre_white_balance, finish_after_white_balance, SampleRect, TechnicalAnalysis,
+    WorkingImage,
+};
+use super::color::{ColorError, ColorTransform};
+use super::negadoctor::NegadoctorParams;
+use super::orientation::Orientation;
 use crate::scanner::types::FrameArtifact;
+
 
 /// Current schema version for roll profiles.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -244,16 +252,60 @@ impl RollProfile {
     }
 }
 
-/// A scanned frame coupled with its roll profile.
+/// A scanned frame coupled with its roll profile, orientation, and Negadoctor processing state.
 #[derive(Debug, Clone)]
 pub struct PreparedFrame {
     pub source: FrameArtifact,
     pub roll: RollProfile,
+    pub orientation: Orientation,
+    pub params: NegadoctorParams,
+    pub technical: TechnicalAnalysis,
+    pub highlight_wb_rect: Option<SampleRect>,
 }
 
 impl PreparedFrame {
+    /// Creates a prepared frame from an artifact and roll profile with default parameters.
     pub fn new(source: FrameArtifact, roll: RollProfile) -> Self {
-        Self { source, roll }
+        let params = NegadoctorParams::from_dmin(roll.dmin);
+        Self {
+            source,
+            roll,
+            orientation: Orientation::Normal,
+            params,
+            technical: TechnicalAnalysis {
+                dmax: 2.046,
+                scan_bias: -0.05,
+            },
+            highlight_wb_rect: None,
+        }
+    }
+
+    /// Prepares a frame by performing technical analysis on the effective cropped image area.
+    pub fn from_artifact(
+        source: FrameArtifact,
+        roll: RollProfile,
+        pipeline: &impl ColorTransform,
+    ) -> Result<Self, ColorError> {
+        let effective = source
+            .get_effective_image()
+            .map_err(|e| ColorError::Lcms(e.to_string()))?;
+        let working_image =
+            WorkingImage::from_scanner_samples(effective.samples(), effective.pass(), pipeline)?;
+        let technical = analyse_pre_white_balance(&working_image, &roll);
+
+        let mut params = NegadoctorParams::from_dmin(roll.dmin);
+        params.dmax = technical.dmax;
+        params.offset = technical.scan_bias;
+        finish_after_white_balance(&working_image, &mut params);
+
+        Ok(Self {
+            source,
+            roll,
+            orientation: Orientation::Normal,
+            params,
+            technical,
+            highlight_wb_rect: None,
+        })
     }
 }
 

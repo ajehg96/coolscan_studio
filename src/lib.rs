@@ -7,3 +7,5 @@ pub mod output;
 pub mod processing;
 pub mod scanner;
 pub mod tiff;
+pub mod ui;
+
