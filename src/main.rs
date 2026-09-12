@@ -3,6 +3,7 @@ use coolscan_studio::{
     cli,
     frame_position::{self, FramePosition},
     output::{self, OutputPolicy},
+    processing::RollProfile,
     scanner::{
         discover_strip, dots_to_mm, scan_strip_with_session,
         types::{
@@ -108,7 +109,39 @@ fn main() {
             None => FrameSelection::All,
         };
 
-        let request = ScanRequest::new(frames, scan_dpi, requested_samples, do_clean, options.auto_crop);
+        let roll_profile = match options.roll.as_deref() {
+            Some("pro-image-100" | "proimage100" | "pro-image") => {
+                let p = RollProfile::pro_image_100();
+                println!("Roll profile: {} ({})", p.name, p.film_stock);
+                println!(
+                    "  D-min: R={:.4}, G={:.4}, B={:.4}",
+                    p.dmin[0], p.dmin[1], p.dmin[2]
+                );
+                Some(p)
+            }
+            Some(path) => {
+                match RollProfile::load_from_file(Path::new(path)) {
+                    Ok(p) => {
+                        println!("Roll profile: {} ({})", p.name, p.film_stock);
+                        println!(
+                            "  D-min: R={:.4}, G={:.4}, B={:.4}",
+                            p.dmin[0], p.dmin[1], p.dmin[2]
+                        );
+                        Some(p)
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to load roll profile from {path}: {e}");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            None => None,
+        };
+
+        let mut request = ScanRequest::new(frames, scan_dpi, requested_samples, do_clean, options.auto_crop);
+        if let Some(p) = roll_profile {
+            request = request.with_roll(p);
+        }
         let output_policy = OutputPolicy::new(out_dir, true, do_tiff);
 
         let progress = |event: ScanEvent| match event {

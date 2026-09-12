@@ -9,6 +9,7 @@ pub const HELP: &str = "Usage: coolscan-studio [OPTIONS]\n\
     --tiff           Write uncompressed 16-bit linear RGB TIFF master image.\n\
     --output DIR     Directory to write output images; defaults to current directory.\n\
     --no-auto-crop   Disable automatic border detection and keep raw overscan images.\n\
+    --roll PROFILE   Roll profile file path or preset name (e.g. 'pro-image-100').\n\
     --offset-mm MM   Shift along film travel; defaults to 0.\n\
     --help           Show help without opening the scanner.\n\
 \n\
@@ -31,6 +32,7 @@ pub struct Options {
     pub high_fidelity: bool,
     pub clean: bool,
     pub tiff: bool,
+    pub roll: Option<String>,
 }
 
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, String> {
@@ -57,6 +59,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
     let mut high_fidelity = false;
     let mut clean = false;
     let mut tiff = false;
+    let mut roll = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--scan" => {
@@ -76,6 +79,10 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
             }
             "--tiff" | "--16bit" => {
                 tiff = true;
+            }
+            "--roll" if roll.is_none() => {
+                let value = args.next().ok_or("Missing roll profile name or path.")?;
+                roll = Some(value);
             }
             "--output" if output.is_none() => {
                 let dir = args.next().ok_or("Missing output directory.")?;
@@ -142,6 +149,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
         high_fidelity,
         clean,
         tiff,
+        roll,
     }))
 }
 
@@ -167,6 +175,7 @@ mod tests {
                 high_fidelity: false,
                 clean: false,
                 tiff: false,
+                roll: None,
             })
         );
         assert_eq!(
@@ -184,6 +193,7 @@ mod tests {
                 high_fidelity: false,
                 clean: true,
                 tiff: true,
+                roll: None,
             })
         );
         assert_eq!(
@@ -201,6 +211,7 @@ mod tests {
                 high_fidelity: true,
                 clean: false,
                 tiff: false,
+                roll: None,
             })
         );
         assert_eq!(
@@ -218,6 +229,7 @@ mod tests {
                 high_fidelity: false,
                 clean: false,
                 tiff: false,
+                roll: None,
             })
         );
         assert_eq!(
@@ -234,6 +246,24 @@ mod tests {
                 high_fidelity: false,
                 clean: false,
                 tiff: false,
+                roll: None,
+            })
+        );
+        assert_eq!(
+            parse_words("--scan --roll pro-image-100").unwrap(),
+            Some(Options {
+                frame: None,
+                offset_mm: 0.0,
+                scan: true,
+                eject: false,
+                output: None,
+                auto_crop: true,
+                dpi: None,
+                samples: None,
+                high_fidelity: false,
+                clean: false,
+                tiff: false,
+                roll: Some("pro-image-100".into()),
             })
         );
         assert_eq!(
@@ -264,6 +294,7 @@ mod tests {
             "--samples 0",
             "--samples 17",
             "--samples abc",
+            "--roll",
             "--offset-mm 1",
             "--frame 1 --offset-mm",
             "--frame 1 --offset-mm NaN",

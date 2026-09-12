@@ -529,6 +529,7 @@ pub fn scan_strip_with_session(
             pass: final_pass,
             crop: crop_decision,
             scan_metadata,
+            roll: request.roll.clone(),
         };
 
         progress(ScanEvent::FrameCompleted {
@@ -581,6 +582,7 @@ pub fn scan_strip_with_session(
     Ok(StripScanResult {
         frames: acquired_artifacts,
         discovery: strip_discovery,
+        roll: request.roll.clone(),
     })
 }
 

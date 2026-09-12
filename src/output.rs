@@ -195,6 +195,7 @@ mod tests {
                 software_passes: 1,
                 infrared_cleaned_pixels: None,
             },
+            roll: None,
         };
 
         let saved = save_frame_outputs(&artifact, &policy).unwrap();

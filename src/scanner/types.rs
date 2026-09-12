@@ -6,6 +6,8 @@ use nkscan::{
     scan::{framing::Framing, pass::Pass},
 };
 
+use crate::processing::roll::RollProfile;
+
 /// Selection of frames to scan from a strip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrameSelection {
@@ -35,6 +37,7 @@ pub struct ScanRequest {
     pub samples: u8,
     pub clean: bool,
     pub auto_crop: bool,
+    pub roll: Option<RollProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +83,14 @@ impl ScanRequest {
             samples,
             clean,
             auto_crop,
+            roll: None,
         }
+    }
+
+    /// Associates a roll profile with this scan request.
+    pub fn with_roll(mut self, roll: RollProfile) -> Self {
+        self.roll = Some(roll);
+        self
     }
 
     pub fn validate(&self) -> Result<(), ScanRequestError> {
@@ -163,6 +173,7 @@ impl StripDiscovery {
 pub struct StripScanResult {
     pub frames: Vec<FrameArtifact>,
     pub discovery: StripDiscovery,
+    pub roll: Option<RollProfile>,
 }
 
 /// A scanned frame artifact preserving high-bit-depth master samples,
@@ -181,6 +192,8 @@ pub struct FrameArtifact {
     pub crop: Option<crate::crop::CropDecision>,
     /// Metadata captured during scan
     pub scan_metadata: ScanMetadata,
+    /// Roll profile associated with this frame, if specified
+    pub roll: Option<RollProfile>,
 }
 
 /// Effective view of frame image data (either cropped or master).
@@ -465,6 +478,7 @@ mod tests {
                 software_passes: 1,
                 infrared_cleaned_pixels: None,
             },
+            roll: None,
         };
 
         assert!(artifact.cropped_samples().is_none());
@@ -505,6 +519,7 @@ mod tests {
                 software_passes: 1,
                 infrared_cleaned_pixels: None,
             },
+            roll: None,
         };
 
         let cropped = artifact.cropped_samples().unwrap().unwrap();
@@ -514,5 +529,13 @@ mod tests {
         let effective = artifact.get_effective_image().unwrap();
         assert_eq!(effective.pass().rows, 2);
         assert_eq!(effective.pass().cols, 2);
+    }
+
+    #[test]
+    fn scan_request_with_roll_profile() {
+        let roll = RollProfile::pro_image_100();
+        let request = ScanRequest::new(FrameSelection::All, 2900, 1, true, true)
+            .with_roll(roll.clone());
+        assert_eq!(request.roll, Some(roll));
     }
 }
