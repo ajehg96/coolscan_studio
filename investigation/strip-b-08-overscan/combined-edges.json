@@ -1,0 +1,19 @@
+{
+  "discovery_frame2_start_column": 143,
+  "discovery_frame2_expected_end_column": 279,
+  "discovery_trailing_candidate_column": 285,
+  "preview_leading_candidate_column": 25,
+  "preview_trailing_candidate_column": 1056,
+  "preview_width_columns": 1079,
+  "preview_trailing_overscan": true,
+  "leading_confident": true,
+  "trailing_confidence": "high-res-confident",
+  "estimated_frame_columns": [
+    25,
+    1056
+  ],
+  "estimated_frame_mm": [
+    0.876,
+    36.996
+  ]
+}

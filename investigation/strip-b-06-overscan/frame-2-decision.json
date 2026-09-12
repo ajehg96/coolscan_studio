@@ -1,0 +1,11 @@
+{
+  "frame": 2,
+  "accepted": false,
+  "is_blank": false,
+  "columns": (0, 1042),
+  "travel_dots": (4380, 8548),
+  "width_columns": 1042,
+  "width_mm": 36.506,
+  "leading": "Confident { column: 30, dots: 4500 }",
+  "trailing": "Ambiguous { fallback_column: 1042, fallback_dots: 8548, reason: "Trailing edge transition below confidence threshold or insufficient overscan" }"
+}

@@ -1,0 +1,36 @@
+{
+  "folder": "investigation/strip-b-04-local",
+  "preview_shape": [
+    717,
+    1027
+  ],
+  "registered_rect": [
+    4470,
+    0,
+    8579,
+    2869
+  ],
+  "candidate_columns": [
+    34,
+    1002
+  ],
+  "candidate_strength": [
+    0.49004484434669493,
+    0.0018068929248045151
+  ],
+  "noise": 0.006728858991485592,
+  "threshold": 0.040373153948913554,
+  "accepted": false,
+  "chosen_columns": [
+    0,
+    1027
+  ],
+  "chosen_travel_dots": [
+    0,
+    4108
+  ],
+  "chosen_travel_mm": [
+    0.0,
+    35.98
+  ]
+}

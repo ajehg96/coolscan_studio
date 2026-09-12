@@ -1,0 +1,19 @@
+{
+  "folder": "investigation/strip-b-04-local",
+  "reference_rgb": [
+    56397.0,
+    57277.0,
+    54989.0
+  ],
+  "film_like_fraction_range": [
+    0.0,
+    0.9981447124304267
+  ],
+  "threshold": 0.05,
+  "run_length_columns": 8,
+  "first_inside_image_column": null,
+  "last_inside_image_column": 1027,
+  "left_border_mm": null,
+  "right_border_mm": 0.0,
+  "columns_below_5_percent": 824
+}

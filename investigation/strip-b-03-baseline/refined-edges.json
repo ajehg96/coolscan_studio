@@ -1,0 +1,36 @@
+{
+  "folder": "investigation/strip-b-03-baseline",
+  "preview_shape": [
+    717,
+    1027
+  ],
+  "registered_rect": [
+    4440,
+    0,
+    8549,
+    2869
+  ],
+  "candidate_columns": [
+    39,
+    1011
+  ],
+  "candidate_strength": [
+    0.4788345715817659,
+    0.003543092755442956
+  ],
+  "noise": 0.006591273904411906,
+  "threshold": 0.039547643426471435,
+  "accepted": false,
+  "chosen_columns": [
+    0,
+    1027
+  ],
+  "chosen_travel_dots": [
+    0,
+    4108
+  ],
+  "chosen_travel_mm": [
+    0.0,
+    35.98
+  ]
+}

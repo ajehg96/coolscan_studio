@@ -1,0 +1,716 @@
+{
+  "investigation/strip-b-01": {
+    "folder": "investigation/strip-b-01",
+    "model_center": [
+      1.8487413816514038,
+      0.7462276965715532,
+      0.40492063633064224
+    ],
+    "model_radius": 0.034142357366369606,
+    "frames": [
+      {
+        "frame": 1,
+        "detected_cols": [
+          0,
+          135
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          0,
+          135
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 2,
+        "detected_cols": [
+          143,
+          278
+        ],
+        "leading_cross": null,
+        "trailing_cross": 287,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          143,
+          278
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 3,
+        "detected_cols": [
+          287,
+          422
+        ],
+        "leading_cross": 275,
+        "trailing_cross": 427,
+        "leading_confident": true,
+        "trailing_confident": true,
+        "accepted": true,
+        "chosen_cols": [
+          275,
+          427
+        ],
+        "length_cols": 152,
+        "length_mm": 39.94
+      },
+      {
+        "frame": 4,
+        "detected_cols": [
+          430,
+          565
+        ],
+        "leading_cross": 418,
+        "trailing_cross": 572,
+        "leading_confident": true,
+        "trailing_confident": true,
+        "accepted": true,
+        "chosen_cols": [
+          418,
+          572
+        ],
+        "length_cols": 154,
+        "length_mm": 40.46
+      },
+      {
+        "frame": 5,
+        "detected_cols": [
+          574,
+          709
+        ],
+        "leading_cross": 562,
+        "trailing_cross": null,
+        "leading_confident": true,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          574,
+          709
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 6,
+        "detected_cols": [
+          717,
+          852
+        ],
+        "leading_cross": null,
+        "trailing_cross": 849,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          717,
+          852
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      }
+    ]
+  },
+  "investigation/strip-b-02": {
+    "folder": "investigation/strip-b-02",
+    "model_center": [
+      1.848948614044163,
+      0.7466900142162558,
+      0.40483738830333904
+    ],
+    "model_radius": 0.058269058987930764,
+    "frames": [
+      {
+        "frame": 1,
+        "detected_cols": [
+          0,
+          135
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          0,
+          135
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 2,
+        "detected_cols": [
+          143,
+          278
+        ],
+        "leading_cross": null,
+        "trailing_cross": 285,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          143,
+          278
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 3,
+        "detected_cols": [
+          287,
+          422
+        ],
+        "leading_cross": 275,
+        "trailing_cross": 427,
+        "leading_confident": true,
+        "trailing_confident": true,
+        "accepted": true,
+        "chosen_cols": [
+          275,
+          427
+        ],
+        "length_cols": 152,
+        "length_mm": 39.94
+      },
+      {
+        "frame": 4,
+        "detected_cols": [
+          430,
+          565
+        ],
+        "leading_cross": 418,
+        "trailing_cross": null,
+        "leading_confident": true,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          430,
+          565
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 5,
+        "detected_cols": [
+          574,
+          709
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          574,
+          709
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 6,
+        "detected_cols": [
+          718,
+          853
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          718,
+          853
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      }
+    ]
+  },
+  "investigation/strip-b-03-baseline": {
+    "folder": "investigation/strip-b-03-baseline",
+    "model_center": [
+      1.8480836412909052,
+      0.746832470227301,
+      0.4052378292523521
+    ],
+    "model_radius": 0.03649471530021801,
+    "frames": [
+      {
+        "frame": 1,
+        "detected_cols": [
+          0,
+          137
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          0,
+          137
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      },
+      {
+        "frame": 2,
+        "detected_cols": [
+          143,
+          280
+        ],
+        "leading_cross": null,
+        "trailing_cross": 286,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          143,
+          280
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      },
+      {
+        "frame": 3,
+        "detected_cols": [
+          287,
+          424
+        ],
+        "leading_cross": 275,
+        "trailing_cross": 428,
+        "leading_confident": true,
+        "trailing_confident": true,
+        "accepted": true,
+        "chosen_cols": [
+          275,
+          428
+        ],
+        "length_cols": 153,
+        "length_mm": 40.2
+      },
+      {
+        "frame": 4,
+        "detected_cols": [
+          431,
+          568
+        ],
+        "leading_cross": 419,
+        "trailing_cross": 572,
+        "leading_confident": true,
+        "trailing_confident": true,
+        "accepted": true,
+        "chosen_cols": [
+          419,
+          572
+        ],
+        "length_cols": 153,
+        "length_mm": 40.2
+      },
+      {
+        "frame": 5,
+        "detected_cols": [
+          574,
+          711
+        ],
+        "leading_cross": 562,
+        "trailing_cross": null,
+        "leading_confident": true,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          574,
+          711
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      },
+      {
+        "frame": 6,
+        "detected_cols": [
+          718,
+          855
+        ],
+        "leading_cross": null,
+        "trailing_cross": 851,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          718,
+          855
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      }
+    ]
+  },
+  "investigation/strip-b-04-local": {
+    "folder": "investigation/strip-b-04-local",
+    "model_center": [
+      1.8476233924226626,
+      0.7462414578587699,
+      0.40611982078051634
+    ],
+    "model_radius": 0.06063506461804982,
+    "frames": [
+      {
+        "frame": 1,
+        "detected_cols": [
+          0,
+          137
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          0,
+          137
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      },
+      {
+        "frame": 2,
+        "detected_cols": [
+          143,
+          280
+        ],
+        "leading_cross": null,
+        "trailing_cross": 278,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          143,
+          280
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      },
+      {
+        "frame": 3,
+        "detected_cols": [
+          286,
+          423
+        ],
+        "leading_cross": 274,
+        "trailing_cross": 428,
+        "leading_confident": true,
+        "trailing_confident": true,
+        "accepted": true,
+        "chosen_cols": [
+          274,
+          428
+        ],
+        "length_cols": 154,
+        "length_mm": 40.46
+      },
+      {
+        "frame": 4,
+        "detected_cols": [
+          429,
+          566
+        ],
+        "leading_cross": 417,
+        "trailing_cross": null,
+        "leading_confident": true,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          429,
+          566
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      },
+      {
+        "frame": 5,
+        "detected_cols": [
+          573,
+          710
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          573,
+          710
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      },
+      {
+        "frame": 6,
+        "detected_cols": [
+          716,
+          853
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          716,
+          853
+        ],
+        "length_cols": 137,
+        "length_mm": 36.0
+      }
+    ]
+  },
+  "investigation/strip-b-06-overscan": {
+    "folder": "investigation/strip-b-06-overscan",
+    "model_center": [
+      1.8450645743393876,
+      0.747076206527433,
+      0.40734819888508367
+    ],
+    "model_radius": 0.05195540122500008,
+    "frames": [
+      {
+        "frame": 1,
+        "detected_cols": [
+          0,
+          135
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          0,
+          135
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 2,
+        "detected_cols": [
+          143,
+          278
+        ],
+        "leading_cross": null,
+        "trailing_cross": 282,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          143,
+          278
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 3,
+        "detected_cols": [
+          286,
+          421
+        ],
+        "leading_cross": 274,
+        "trailing_cross": 424,
+        "leading_confident": true,
+        "trailing_confident": true,
+        "accepted": true,
+        "chosen_cols": [
+          274,
+          424
+        ],
+        "length_cols": 150,
+        "length_mm": 39.41
+      },
+      {
+        "frame": 4,
+        "detected_cols": [
+          429,
+          564
+        ],
+        "leading_cross": 417,
+        "trailing_cross": null,
+        "leading_confident": true,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          429,
+          564
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 5,
+        "detected_cols": [
+          572,
+          707
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          572,
+          707
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      },
+      {
+        "frame": 6,
+        "detected_cols": [
+          715,
+          850
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          715,
+          850
+        ],
+        "length_cols": 135,
+        "length_mm": 35.47
+      }
+    ]
+  },
+  "investigation/strip-b-07-overscan": {
+    "folder": "investigation/strip-b-07-overscan",
+    "model_center": [
+      1.8450834879406308,
+      0.748570055034933,
+      0.4062073929796333
+    ],
+    "model_radius": 0.060871151074207056,
+    "frames": [
+      {
+        "frame": 1,
+        "detected_cols": [
+          0,
+          136
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          0,
+          136
+        ],
+        "length_cols": 136,
+        "length_mm": 35.74
+      },
+      {
+        "frame": 2,
+        "detected_cols": [
+          143,
+          279
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          143,
+          279
+        ],
+        "length_cols": 136,
+        "length_mm": 35.74
+      },
+      {
+        "frame": 3,
+        "detected_cols": [
+          286,
+          422
+        ],
+        "leading_cross": null,
+        "trailing_cross": 427,
+        "leading_confident": false,
+        "trailing_confident": true,
+        "accepted": false,
+        "chosen_cols": [
+          286,
+          422
+        ],
+        "length_cols": 136,
+        "length_mm": 35.74
+      },
+      {
+        "frame": 4,
+        "detected_cols": [
+          429,
+          565
+        ],
+        "leading_cross": 417,
+        "trailing_cross": null,
+        "leading_confident": true,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          429,
+          565
+        ],
+        "length_cols": 136,
+        "length_mm": 35.74
+      },
+      {
+        "frame": 5,
+        "detected_cols": [
+          572,
+          708
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          572,
+          708
+        ],
+        "length_cols": 136,
+        "length_mm": 35.74
+      },
+      {
+        "frame": 6,
+        "detected_cols": [
+          715,
+          851
+        ],
+        "leading_cross": null,
+        "trailing_cross": null,
+        "leading_confident": false,
+        "trailing_confident": false,
+        "accepted": false,
+        "chosen_cols": [
+          715,
+          851
+        ],
+        "length_cols": 136,
+        "length_mm": 35.74
+      }
+    ]
+  }
+}

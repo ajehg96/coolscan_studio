@@ -1,0 +1,193 @@
+caps=Capabilities {
+    identity: Identity {
+        qualifier: 0,
+        device_type: 6,
+        removable: true,
+        ansi_version: 2,
+        vendor: "Nikon",
+        product: "LS-40 ED",
+        revision: "1.20",
+    },
+    address: Address {
+        page_length: 81,
+        transfer: Transfer(
+            MICROCODE | READ_LINE_COLS,
+        ),
+        window_descriptor_len: 58,
+        set_parameter_len: 15,
+        scsi_buffer: None,
+        image_buffer_kb: 64,
+        units_attachable: 1,
+        adapter_id: Some(
+            1,
+        ),
+        holder_id: None,
+        connected_adapter: Some(
+            49,
+        ),
+        coordinate_base: CoordinateBase(
+            0x0,
+        ),
+        pitch_rule: EachPitch,
+        addressing_kind: AddressingKind(
+            ADDR_MEDIUM | MEDIUM_MOVABLE | MECHANISM_MOVABLE,
+        ),
+        x_axis: Axis {
+            optical_dpi: 2900,
+            dpi_range: 90..=2900,
+            address_range: 0..=0,
+            address_offset: 0,
+            boundary: 2870,
+        },
+        y_axis: Axis {
+            optical_dpi: 2900,
+            dpi_range: 90..=2900,
+            address_range: 0..=34656,
+            address_offset: 0,
+            boundary: 4332,
+        },
+        y_outside: Some(
+            0..=4332,
+        ),
+        thumbnail_resolution: 96..=96,
+        max_frames: 6,
+        loaded_frames: 6,
+        focus_range: 0..=323,
+        lamp_warmup_time: 0,
+        bit_depth: 12,
+        ccd_pixels: 2870,
+        line_gap: 0,
+        lines: 3,
+    },
+    features: Features {
+        page_length: 35,
+        cooperation: HostCooperation(
+            AVERAGING | TRUNCATED,
+        ),
+        data_types: DataTypes(
+            GAMMA_READ | GAMMA_WRITE | SHADING_READ | DARK_VOLTAGE_READ | COOP_PARAMS_READ | ANALOG_GAIN_READ | EXPOSURE_READ | SETUP_READ | PERFORATION_READ | BOUNDARY2_READ | BOUNDARY2_WRITE | DRIVER_VERSION_READ | DRIVER_VERSION_WRITE,
+        ),
+        depths: Depths {
+            halftone_mask: 0,
+            lut_input: 12,
+            lut_output: 12,
+            histogram: 0,
+            max_value: 12,
+            matrix: 0,
+            filter: 0,
+            shading: 12,
+            dark_current: 12,
+        },
+        execute: [Initialize (80h), ReturnToOrigin (81h), AutoFocus (A0h), SetupShading (B0h), Other(177) (B1h), Other(179) (B3h), Other(180) (B4h), Other(192) (C0h), FocusMove (C1h), Unload (D0h), Other(210) (D2h), Other(214) (D6h)],
+        additional: 12,
+        volatile_buffer: 4,
+        nonvolatile_buffer: 0,
+    },
+    set_window: SetWindowFunction {
+        page_length: 24,
+        kind: ScanKind(
+            IMAGE | THUMBNAIL | SETUP_1,
+        ),
+        mode: ScanMode(
+            NORMAL_QUALITY | REVERSE_DIRECTION,
+        ),
+        interleaving: ColorInterleaving(
+            LINE_WITHOUT_DISTANCE,
+        ),
+        components: ColorComponents(
+            DROPOUT | RGB,
+        ),
+        order: [
+            None,
+            None,
+            None,
+            None,
+        ],
+        depth: BitDepth(
+            BIT_8 | BIT_12,
+        ),
+        setup_modes: 0,
+        dic: 0,
+        dic_len: 0,
+        aic: AnalogControl(
+            EXPOSURE_VALUE,
+        ),
+        aic_len: 9,
+        exposure: 1..=67108863,
+        filter_support: 0,
+        matrix_support: 0,
+        halftone_support: 0,
+    },
+    ccd: None,
+    frames: None,
+}
+frames=[
+    Rect {
+        top: 180,
+        left: 0,
+        bottom: 4259,
+        right: 2869,
+    },
+    Rect {
+        top: 4470,
+        left: 0,
+        bottom: 8549,
+        right: 2869,
+    },
+    Rect {
+        top: 8760,
+        left: 0,
+        bottom: 12839,
+        right: 2869,
+    },
+    Rect {
+        top: 13050,
+        left: 0,
+        bottom: 17129,
+        right: 2869,
+    },
+    Rect {
+        top: 17340,
+        left: 0,
+        bottom: 21419,
+        right: 2869,
+    },
+    Rect {
+        top: 21630,
+        left: 0,
+        bottom: 25709,
+        right: 2869,
+    },
+]
+layout=Layout {
+    pixels: 95,
+    lines: 1155,
+    pitch: 30,
+    line_pitch: 30,
+    dpi: 96,
+    bytes_per_sample: 2,
+    bits_per_sample: 12,
+    channels: [
+        1,
+        2,
+        3,
+    ],
+    interleaving: ColorInterleaving(
+        LINE_WITHOUT_DISTANCE,
+    ),
+    readings_per_line: 1,
+    ccd_lines: 3,
+    packed_rows: 1,
+    registration_gap: 0,
+    granule: 570,
+    truncated_bytes_line: (
+        0,
+        0,
+    ),
+    truncated_lines_frame: (
+        0,
+        0,
+    ),
+    multiline_registered: false,
+}
+rows=95 cols=1155 channels=3

@@ -1,0 +1,7 @@
+   Compiling coolscan-studio v0.1.0 (C:\coolscan\coolscan-studio)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.94s
+     Running `target\debug\examples\replay_boundaries.exe investigation/strip-b-02/discovery.raw 95 1155 12 137`
+TRACE tiled starts=[5, 151, 292, 437, 581, 723] length=135
+Official: Detected { frames: [5, 148, 292, 435, 579, 723], pitch: 144, length: 135 }
+Preserve local edges: Detected { frames: [5, 151, 292, 437, 581, 723], pitch: 144, length: 135 }
+TRACE tiled starts=[5, 151, 292, 437, 581, 723] length=135

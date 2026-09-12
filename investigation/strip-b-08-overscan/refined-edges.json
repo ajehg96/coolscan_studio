@@ -1,0 +1,36 @@
+{
+  "folder": "investigation/strip-b-08-overscan",
+  "preview_shape": [
+    717,
+    1079
+  ],
+  "registered_rect": [
+    4410,
+    0,
+    8729,
+    2869
+  ],
+  "candidate_columns": [
+    25,
+    1056
+  ],
+  "candidate_strength": [
+    0.5072872777032043,
+    1.0354574558705316
+  ],
+  "noise": 0.0062091686928716526,
+  "threshold": 0.037255012157229914,
+  "accepted": true,
+  "chosen_columns": [
+    25,
+    1056
+  ],
+  "chosen_travel_dots": [
+    100,
+    4224
+  ],
+  "chosen_travel_mm": [
+    0.876,
+    36.996
+  ]
+}

@@ -1,0 +1,78 @@
+BoundaryType2 {
+    frames: [
+        FramePosition {
+            top: 120,
+            perf_number: 1,
+            perf_decimal: 0,
+            pulse_number: 34,
+        },
+        FramePosition {
+            top: 4440,
+            perf_number: 9,
+            perf_decimal: 1,
+            pulse_number: 10,
+        },
+        FramePosition {
+            top: 8700,
+            perf_number: 17,
+            perf_decimal: 1,
+            pulse_number: 8,
+        },
+        FramePosition {
+            top: 13020,
+            perf_number: 25,
+            perf_decimal: 1,
+            pulse_number: 10,
+        },
+        FramePosition {
+            top: 17340,
+            perf_number: 33,
+            perf_decimal: 1,
+            pulse_number: 20,
+        },
+        FramePosition {
+            top: 21570,
+            perf_number: 41,
+            perf_decimal: 1,
+            pulse_number: 6,
+        },
+    ],
+}
+frames=[
+    Rect {
+        top: 120,
+        left: 0,
+        bottom: 4439,
+        right: 2869,
+    },
+    Rect {
+        top: 4440,
+        left: 0,
+        bottom: 8759,
+        right: 2869,
+    },
+    Rect {
+        top: 8700,
+        left: 0,
+        bottom: 13019,
+        right: 2869,
+    },
+    Rect {
+        top: 13020,
+        left: 0,
+        bottom: 17339,
+        right: 2869,
+    },
+    Rect {
+        top: 17340,
+        left: 0,
+        bottom: 21659,
+        right: 2869,
+    },
+    Rect {
+        top: 21570,
+        left: 0,
+        bottom: 25889,
+        right: 2869,
+    },
+]

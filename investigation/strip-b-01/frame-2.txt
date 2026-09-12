@@ -1,0 +1,164 @@
+rect=Rect { top: 4299, left: 0, bottom: 8631, right: 2869 }
+windows=[
+    Window {
+        id: 1,
+        auto: false,
+        resolution: (
+            725,
+            725,
+        ),
+        origin: (
+            0,
+            4299,
+        ),
+        size: (
+            2869,
+            4332,
+        ),
+        brightness: 0,
+        threshold: 0,
+        contrast: 0,
+        composition: MultilevelRGB,
+        bpp: 12,
+        halftone_pattern: 0,
+        padding_type: 0,
+        bit_ordering: 0,
+        compression_type: 0,
+        compression_argument: 0,
+        multiple_reading: 0,
+        color_ordering: 0,
+        flags: Flags(
+            AVERAGING | POSITIVE,
+        ),
+        setup_mode: 0,
+        scanning_kind: ScanKind(
+            IMAGE,
+        ),
+        scanning_mode: ScanMode(
+            NORMAL_QUALITY,
+        ),
+        color_interleaving: ColorInterleaving(
+            LINE_WITHOUT_DISTANCE,
+        ),
+        ae_value: 255,
+        exposure: 0,
+    },
+    Window {
+        id: 2,
+        auto: false,
+        resolution: (
+            725,
+            725,
+        ),
+        origin: (
+            0,
+            4299,
+        ),
+        size: (
+            2869,
+            4332,
+        ),
+        brightness: 0,
+        threshold: 0,
+        contrast: 0,
+        composition: MultilevelRGB,
+        bpp: 12,
+        halftone_pattern: 0,
+        padding_type: 0,
+        bit_ordering: 0,
+        compression_type: 0,
+        compression_argument: 0,
+        multiple_reading: 0,
+        color_ordering: 0,
+        flags: Flags(
+            AVERAGING | POSITIVE,
+        ),
+        setup_mode: 0,
+        scanning_kind: ScanKind(
+            IMAGE,
+        ),
+        scanning_mode: ScanMode(
+            NORMAL_QUALITY,
+        ),
+        color_interleaving: ColorInterleaving(
+            LINE_WITHOUT_DISTANCE,
+        ),
+        ae_value: 255,
+        exposure: 0,
+    },
+    Window {
+        id: 3,
+        auto: false,
+        resolution: (
+            725,
+            725,
+        ),
+        origin: (
+            0,
+            4299,
+        ),
+        size: (
+            2869,
+            4332,
+        ),
+        brightness: 0,
+        threshold: 0,
+        contrast: 0,
+        composition: MultilevelRGB,
+        bpp: 12,
+        halftone_pattern: 0,
+        padding_type: 0,
+        bit_ordering: 0,
+        compression_type: 0,
+        compression_argument: 0,
+        multiple_reading: 0,
+        color_ordering: 0,
+        flags: Flags(
+            AVERAGING | POSITIVE,
+        ),
+        setup_mode: 0,
+        scanning_kind: ScanKind(
+            IMAGE,
+        ),
+        scanning_mode: ScanMode(
+            NORMAL_QUALITY,
+        ),
+        color_interleaving: ColorInterleaving(
+            LINE_WITHOUT_DISTANCE,
+        ),
+        ae_value: 255,
+        exposure: 0,
+    },
+]
+layout=Layout {
+    pixels: 717,
+    lines: 1083,
+    pitch: 4,
+    line_pitch: 4,
+    dpi: 725,
+    bytes_per_sample: 2,
+    bits_per_sample: 12,
+    channels: [
+        1,
+        2,
+        3,
+    ],
+    interleaving: ColorInterleaving(
+        LINE_WITHOUT_DISTANCE,
+    ),
+    readings_per_line: 1,
+    ccd_lines: 3,
+    packed_rows: 1,
+    registration_gap: 0,
+    granule: 4302,
+    truncated_bytes_line: (
+        0,
+        0,
+    ),
+    truncated_lines_frame: (
+        0,
+        0,
+    ),
+    multiline_registered: false,
+}
+rows=717 cols=1083 channels=3

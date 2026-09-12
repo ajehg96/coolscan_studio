@@ -1,0 +1,20 @@
+{
+  "folder": "investigation/strip-b-08-overscan",
+  "reference_rgb": [
+    1343.0,
+    544.0,
+    296.0
+  ],
+  "reference_source": "discovery-gap-cores",
+  "film_like_fraction_range": [
+    0.0,
+    1.0
+  ],
+  "threshold": 0.05,
+  "run_length_columns": 8,
+  "first_inside_image_column": null,
+  "last_inside_image_column": 1055,
+  "left_border_mm": null,
+  "right_border_mm": 0.841,
+  "columns_below_5_percent": 809
+}

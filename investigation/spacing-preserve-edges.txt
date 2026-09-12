@@ -1,0 +1,10 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `target\debug\examples\spacing_experiment.exe --preserve-edges --assert-edges`
+TRACE tiled starts=[30, 162, 294, 426, 558, 690] length=120
+regular scale=1: actual=[30, 162, 294, 426, 558, 690], detected=[30, 162, 294, 426, 558, 690], errors_in_coarse_pixels=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+TRACE tiled starts=[120, 648, 1176, 1704, 2232, 2760] length=480
+regular scale=4: actual=[120, 648, 1176, 1704, 2232, 2760], detected=[120, 648, 1176, 1704, 2232, 2760], errors_in_coarse_pixels=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+TRACE tiled starts=[30, 165, 294, 429, 558, 690] length=120
+uneven scale=1: actual=[30, 165, 294, 429, 558, 690], detected=[30, 165, 294, 429, 558, 690], errors_in_coarse_pixels=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+TRACE tiled starts=[120, 660, 1176, 1716, 2232, 2760] length=480
+uneven scale=4: actual=[120, 660, 1176, 1716, 2232, 2760], detected=[120, 660, 1176, 1716, 2232, 2760], errors_in_coarse_pixels=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

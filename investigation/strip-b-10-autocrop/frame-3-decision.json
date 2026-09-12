@@ -1,0 +1,14 @@
+{
+  "frame": 3,
+  "accepted": true,
+  "is_blank": false,
+  "columns": (32, 1031),
+  "rows": (25, 691),
+  "travel_dots": (8900, 12896),
+  "width_columns": 999,
+  "width_mm": 34.999,
+  "height_rows": 666,
+  "height_mm": 23.333,
+  "leading": "Confident { column: 18, dots: 8844 }",
+  "trailing": "Confident { column: 1045, dots: 12952 }"
+}

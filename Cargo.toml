@@ -1,0 +1,7 @@
+[package]
+name = "coolscan-studio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nkscan = { git = "https://github.com/activexray/nkscan", rev = "4f276883e3971aac92fa58a3d8284994105f80d8" }

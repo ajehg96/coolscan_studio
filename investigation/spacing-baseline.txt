@@ -1,0 +1,11 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target\debug\examples\spacing_experiment.exe --assert-edges`
+regular scale=1: actual=[30, 162, 294, 426, 558, 690], detected=[30, 162, 294, 426, 558, 690], errors_in_coarse_pixels=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+regular scale=4: actual=[120, 648, 1176, 1704, 2232, 2760], detected=[120, 648, 1176, 1704, 2232, 2760], errors_in_coarse_pixels=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+uneven scale=1: actual=[30, 165, 294, 429, 558, 690], detected=[30, 162, 294, 426, 558, 689], errors_in_coarse_pixels=[0.0, -3.0, 0.0, -3.0, 0.0, -1.0]
+uneven scale=4: actual=[120, 660, 1176, 1716, 2232, 2760], detected=[122, 650, 1177, 1704, 2232, 2759], errors_in_coarse_pixels=[0.5, -2.5, 0.25, -3.0, 0.0, -0.25]
+
+thread 'main' (32808) panicked at examples\spacing_experiment.rs:65:9:
+Detector moved known image boundaries more than one coarse pixel
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: process didn't exit successfully: `target\debug\examples\spacing_experiment.exe --assert-edges` (exit code: 101)

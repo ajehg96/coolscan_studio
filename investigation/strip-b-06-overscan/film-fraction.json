@@ -1,0 +1,20 @@
+{
+  "folder": "investigation/strip-b-06-overscan",
+  "reference_rgb": [
+    56797.0,
+    57853.0,
+    55437.0
+  ],
+  "reference_source": "preview-leading-overscan (INVALID when this is gate; discovery reference required)",
+  "film_like_fraction_range": [
+    0.0,
+    1.0
+  ],
+  "threshold": 0.05,
+  "run_length_columns": 8,
+  "first_inside_image_column": null,
+  "last_inside_image_column": 1042,
+  "left_border_mm": null,
+  "right_border_mm": 0.0,
+  "columns_below_5_percent": 832
+}

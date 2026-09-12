@@ -1,0 +1,31 @@
+/target
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Scanned images and raw capture data
+*.bmp
+*.BMP
+*.ppm
+*.PPM
+*.raw
+*.RAW
+*.tif
+*.TIF
+*.tiff
+*.TIFF
+*.xmp
+*.XMP
+*.png
+*.PNG
+*.jpg
+*.JPG
+*.jpeg
+*.JPEG
+
+# Scan capture output folders
+scans-*/
+quick-pass/
