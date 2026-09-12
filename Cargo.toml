@@ -7,3 +7,4 @@ edition = "2024"
 nkscan = { git = "https://github.com/activexray/nkscan", rev = "4f276883e3971aac92fa58a3d8284994105f80d8" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+lcms2 = "6.2.0"
