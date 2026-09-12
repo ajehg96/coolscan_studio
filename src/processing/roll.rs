@@ -47,6 +47,16 @@ impl ScannerProfile {
             icc_path: None,
         }
     }
+
+    /// Returns the ICC profile filename for Darktable sidecar generation.
+    pub fn icc_profile_name(&self) -> &str {
+        if let Some(path) = &self.icc_path {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                return name;
+            }
+        }
+        "NKLS4000LS40_N.icc"
+    }
 }
 
 /// Roll-level film characteristics and scanner calibration.
@@ -307,6 +317,20 @@ impl PreparedFrame {
             highlight_wb_rect: None,
         })
     }
+
+    /// Generates the Darktable XMP sidecar for this prepared frame.
+    pub fn to_darktable_xmp(
+        &self,
+        image_filename: &str,
+    ) -> Result<crate::darktable::xmp::DarktableXmp, crate::darktable::xmp::DarktableError> {
+        let profile_name = self.roll.scanner_profile.icc_profile_name();
+        crate::darktable::xmp::DarktableXmp::for_frame(
+            image_filename,
+            profile_name,
+            &self.params,
+            self.orientation,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -409,5 +433,56 @@ mod tests {
         assert_eq!(profile, loaded);
 
         let _ = std::fs::remove_file(&temp_file);
+    }
+
+    #[test]
+    fn prepared_frame_darktable_xmp_generation() {
+        let profile = RollProfile::pro_image_100();
+        let artifact = FrameArtifact {
+            frame_number: 1,
+            total_frames: 1,
+            dpi: 2900,
+            raw_rect: nkscan::protocol::data::Rect {
+                left: 0,
+                right: 4,
+                top: 0,
+                bottom: 4,
+            },
+            samples: nkscan::protocol::decode::Samples {
+                colors: vec![vec![1000; 16]],
+                ir: None,
+            },
+            pass: nkscan::scan::pass::Pass {
+                layout: nkscan::protocol::image::Layout::single_line(4, 4, vec![1]),
+                cooperation: Vec::new(),
+                complete: true,
+                blocks: 1,
+                rows: 4,
+                cols: 4,
+            },
+            crop: None,
+            scan_metadata: crate::scanner::types::ScanMetadata {
+                scanner_model: None,
+                focus_position: None,
+                exposures: None,
+                hardware_samples: 1,
+                software_passes: 1,
+                infrared_cleaned_pixels: None,
+            },
+            roll: Some(profile.clone()),
+        };
+
+        let mut frame = PreparedFrame::new(artifact, profile);
+        frame.orientation = Orientation::Rotate180;
+        frame.params.dmax = 3.25;
+        frame.params.offset = 0.12;
+
+        let xmp = frame.to_darktable_xmp("frame-1.tif").unwrap();
+        assert_eq!(xmp.derived_from, "frame-1.tif");
+        assert_eq!(xmp.extract_orientation(), Orientation::Rotate180);
+        let extracted_params = xmp.extract_negadoctor_params().unwrap();
+        assert!((extracted_params.dmax - 3.25).abs() < 1e-4);
+        assert!((extracted_params.offset - 0.12).abs() < 1e-4);
+        assert_eq!(xmp.extract_colorin_profile().unwrap(), "NKLS4000LS40_N.icc");
     }
 }

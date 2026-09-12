@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::darktable::xmp::{DarktableError, DarktableXmp};
 use crate::processing::analysis::{
     finish_after_white_balance, sample_highlight_wb, SampleRect, TechnicalAnalysis, WorkingImage,
 };
@@ -421,6 +422,36 @@ impl ReviewSession {
     pub fn is_all_accepted(&self) -> bool {
         !self.frames.is_empty() && self.frames.iter().all(|f| f.accepted)
     }
+
+    /// Generates the Darktable XMP sidecar for the current frame.
+    pub fn current_darktable_xmp(&self) -> Option<DarktableXmp> {
+        let frame = self.current_frame()?;
+        let derived_from = format!("frame-{}.tif", frame.frame_number);
+        let profile_name = self.roll.scanner_profile.icc_profile_name();
+        DarktableXmp::for_frame(
+            &derived_from,
+            profile_name,
+            &frame.params,
+            frame.orientation,
+        )
+        .ok()
+    }
+
+    /// Saves the Darktable XMP sidecar for the current frame to the specified directory.
+    pub fn save_current_xmp(
+        &self,
+        output_dir: &std::path::Path,
+    ) -> Result<std::path::PathBuf, DarktableError> {
+        let frame = self.current_frame().ok_or_else(|| {
+            DarktableError::MissingHistoryItem("No active frame".into())
+        })?;
+        let xmp = self.current_darktable_xmp().ok_or_else(|| {
+            DarktableError::MissingHistoryItem("Could not generate XMP for frame".into())
+        })?;
+        let path = output_dir.join(format!("frame-{}.tif.xmp", frame.frame_number));
+        xmp.write_to_file(&path)?;
+        Ok(path)
+    }
 }
 
 #[cfg(test)]
@@ -658,5 +689,38 @@ mod tests {
         assert_eq!(rw, 20);
         assert_eq!(rh, 10);
         assert_eq!(rpixels.len(), 20 * 10 * 4);
+    }
+
+    #[test]
+    fn review_session_darktable_xmp_save() {
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let roll = RollProfile::pro_image_100();
+        let img = mock_working_image(10, 10);
+        let tech = TechnicalAnalysis {
+            dmax: 3.10,
+            scan_bias: 0.08,
+        };
+        let mut frame = ReviewFrameState::new(3, img, &roll, tech);
+        frame.orientation = Orientation::Rotate270;
+
+        let session = ReviewSession::new(vec![frame], roll, pipeline);
+
+        let temp_dir = std::env::temp_dir().join(format!("dt_xmp_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let saved_path = session.save_current_xmp(&temp_dir).unwrap();
+        assert!(saved_path.exists());
+        assert_eq!(
+            saved_path.file_name().unwrap().to_str().unwrap(),
+            "frame-3.tif.xmp"
+        );
+
+        let parsed = DarktableXmp::parse(&std::fs::read_to_string(&saved_path).unwrap()).unwrap();
+        assert_eq!(parsed.derived_from, "frame-3.tif");
+        assert_eq!(parsed.extract_orientation(), Orientation::Rotate270);
+        let extracted_params = parsed.extract_negadoctor_params().unwrap();
+        assert!((extracted_params.dmax - 3.10).abs() < 1e-4);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
