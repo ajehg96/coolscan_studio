@@ -274,6 +274,18 @@ impl std::fmt::Display for RollProfileError {
 
 impl std::error::Error for RollProfileError {}
 
+impl From<RollProfileError> for ColorError {
+    fn from(err: RollProfileError) -> Self {
+        match err {
+            RollProfileError::UncalibratedRoll => ColorError::UncalibratedRoll(
+                "Roll profile is uncalibrated; D-min calibration required before auto-processing"
+                    .to_string(),
+            ),
+            other => ColorError::Lcms(other.to_string()),
+        }
+    }
+}
+
 impl RollProfile {
     /// Creates and validates a new `RollProfile`.
     pub fn new(
@@ -362,7 +374,7 @@ impl RollProfile {
             calibration: Some(RollCalibration {
                 dmin: [0.8965, 0.9093, 0.8816],
                 scanner_profile: ScannerProfile::ls40_negative(),
-                measured_at: Some("2024-03-01T00:00:00Z".into()),
+                measured_at: None,
                 notes: Some("Measured empirically from LS-40 scans".into()),
             }),
         }
@@ -449,12 +461,13 @@ impl RollProfile {
                     });
                 }
                 let film_stock = FilmStock::from(v1.film_stock.as_str());
-                let calibration = Some(RollCalibration {
-                    dmin: v1.dmin,
-                    scanner_profile: v1.scanner_profile,
-                    measured_at: None,
-                    notes: Some("Migrated from schema v1".to_string()),
-                });
+                let calibration = migrate_legacy_calibration(
+                    &v1.id.0,
+                    &v1.name,
+                    &v1.film_stock,
+                    v1.dmin,
+                    v1.scanner_profile,
+                );
                 RollProfile {
                     version: CURRENT_SCHEMA_VERSION,
                     id: v1.id,
@@ -472,12 +485,13 @@ impl RollProfile {
                     icc_path: None,
                 };
                 let film_stock = FilmStock::from(v0.film_name.as_str());
-                let calibration = Some(RollCalibration {
-                    dmin: v0.dmin,
+                let calibration = migrate_legacy_calibration(
+                    &v0.id,
+                    &v0.film_name,
+                    &v0.film_name,
+                    v0.dmin,
                     scanner_profile,
-                    measured_at: None,
-                    notes: Some("Migrated from schema v0".to_string()),
-                });
+                );
                 RollProfile {
                     version: CURRENT_SCHEMA_VERSION,
                     id: RollId(v0.id),
@@ -505,6 +519,45 @@ impl RollProfile {
     }
 }
 
+/// Conservatively determines whether legacy D-min values represent verified empirical calibration.
+///
+/// Recognises the empirically measured Kodak Pro Image 100 baseline.
+/// Old generic presets (Portra 400, Gold 200) and unknown legacy profiles lacking verified
+/// provenance are migrated as uncalibrated (`calibration: None`), ensuring no fabricated
+/// D-min values are silently promoted to verified calibration.
+fn migrate_legacy_calibration(
+    id: &str,
+    name: &str,
+    film_stock: &str,
+    dmin: [f32; 3],
+    scanner_profile: ScannerProfile,
+) -> Option<RollCalibration> {
+    let lower_id = id.to_lowercase();
+    let lower_name = name.to_lowercase();
+    let lower_stock = film_stock.to_lowercase();
+
+    // Check if this matches the verified empirical Kodak Pro Image 100 baseline:
+    let is_pro_image = lower_id.contains("pro-image")
+        || lower_name.contains("pro image")
+        || lower_stock.contains("pro image");
+    let matches_pro_image_dmin = (dmin[0] - 0.8965).abs() < 1e-3
+        && (dmin[1] - 0.9093).abs() < 1e-3
+        && (dmin[2] - 0.8816).abs() < 1e-3;
+
+    if is_pro_image && matches_pro_image_dmin {
+        return Some(RollCalibration {
+            dmin: [0.8965, 0.9093, 0.8816],
+            scanner_profile,
+            measured_at: None,
+            notes: Some("Measured empirically from LS-40 scans".to_string()),
+        });
+    }
+
+    // All other legacy profiles (generic presets or unknown stocks without provenance)
+    // are migrated as uncalibrated.
+    None
+}
+
 /// A scanned frame coupled with its roll profile, orientation, and Negadoctor processing state.
 #[derive(Debug, Clone)]
 pub struct PreparedFrame {
@@ -517,11 +570,13 @@ pub struct PreparedFrame {
 }
 
 impl PreparedFrame {
-    /// Creates a prepared frame from an artifact and roll profile with default parameters.
-    pub fn new(source: FrameArtifact, roll: RollProfile) -> Self {
-        let dmin = roll.dmin().unwrap_or([1.0, 1.0, 1.0]);
+    /// Creates a prepared frame from an artifact and calibrated roll profile with default parameters.
+    ///
+    /// Requires that the roll profile contains valid calibration data.
+    pub fn new(source: FrameArtifact, roll: RollProfile) -> Result<Self, RollProfileError> {
+        let dmin = roll.dmin().ok_or(RollProfileError::UncalibratedRoll)?;
         let params = NegadoctorParams::from_dmin(dmin);
-        Self {
+        Ok(Self {
             source,
             roll,
             orientation: Orientation::Normal,
@@ -531,7 +586,7 @@ impl PreparedFrame {
                 scan_bias: -0.05,
             },
             highlight_wb_rect: None,
-        }
+        })
     }
 
     /// Prepares a frame by performing technical analysis on the effective cropped image area.
@@ -657,8 +712,13 @@ mod tests {
         let from_art_res = PreparedFrame::from_artifact(artifact.clone(), roll.clone(), &pipeline);
         assert!(matches!(from_art_res, Err(ColorError::UncalibratedRoll(_))));
 
+        // PreparedFrame::new must reject uncalibrated roll
+        let frame_res = PreparedFrame::new(artifact.clone(), roll.clone());
+        assert!(matches!(frame_res, Err(RollProfileError::UncalibratedRoll)));
+
         // PreparedFrame::to_darktable_xmp must reject uncalibrated roll
-        let frame = PreparedFrame::new(artifact, roll);
+        let mut frame = PreparedFrame::new(artifact, RollProfile::pro_image_100()).unwrap();
+        frame.roll = roll;
         let xmp_res = frame.to_darktable_xmp("frame-1.tif");
         assert!(matches!(
             xmp_res,
@@ -682,7 +742,7 @@ mod tests {
 
     #[test]
     fn schema_migration_v0_and_v1() {
-        // v0 migration
+        // v0 migration: Kodak Gold 200 preset without provenance migrates as uncalibrated
         let legacy_v0 = r#"{
             "id": "legacy-gold-200",
             "film_name": "Kodak Gold 200",
@@ -694,10 +754,11 @@ mod tests {
         assert_eq!(migrated_v0.version, CURRENT_SCHEMA_VERSION);
         assert_eq!(migrated_v0.id.0, "legacy-gold-200");
         assert_eq!(migrated_v0.film_stock.name, "Kodak Gold 200");
-        assert_eq!(migrated_v0.dmin(), Some([0.8540, 0.8820, 0.8110]));
+        assert_eq!(migrated_v0.dmin(), None);
+        assert!(!migrated_v0.is_calibrated());
         assert_eq!(migrated_v0.scanner_profile().id, "ls-40-negative");
 
-        // v1 migration
+        // v1 migration: Kodak Pro Image 100 with known empirical baseline migrates as calibrated
         let legacy_v1 = r#"{
             "version": 1,
             "id": "v1-pro-image-100",
@@ -716,7 +777,40 @@ mod tests {
         assert_eq!(migrated_v1.id.0, "v1-pro-image-100");
         assert_eq!(migrated_v1.film_stock.name, "Kodak Pro Image 100");
         assert_eq!(migrated_v1.dmin(), Some([0.8965, 0.9093, 0.8816]));
+        assert!(migrated_v1.is_calibrated());
         assert_eq!(migrated_v1.scanner_profile().id, "ls-40-negative");
+
+        // Legacy Portra 400 with old invented preset values migrates as uncalibrated
+        let legacy_portra = r#"{
+            "version": 1,
+            "id": "v1-portra-400",
+            "name": "Kodak Portra 400",
+            "film_stock": "Kodak Portra 400",
+            "dmin": [0.8850, 0.9020, 0.8750],
+            "scanner_profile": {
+                "id": "ls-40-negative",
+                "name": "Nikon LS-40 ED Negative",
+                "icc_path": null
+            }
+        }"#;
+
+        let migrated_portra = RollProfile::from_json(legacy_portra).unwrap();
+        assert_eq!(migrated_portra.calibration, None);
+        assert_eq!(migrated_portra.dmin(), None);
+        assert!(!migrated_portra.is_calibrated());
+
+        // Unknown legacy profile without provenance migrates as uncalibrated
+        let legacy_unknown = r#"{
+            "id": "custom-film-stock",
+            "film_name": "Custom Unprovenanced Stock",
+            "dmin": [0.8200, 0.8500, 0.8100],
+            "scanner_profile_id": "ls-40-negative"
+        }"#;
+
+        let migrated_unknown = RollProfile::from_json(legacy_unknown).unwrap();
+        assert_eq!(migrated_unknown.calibration, None);
+        assert_eq!(migrated_unknown.dmin(), None);
+        assert!(!migrated_unknown.is_calibrated());
 
         // Unsupported future version
         let future_json = r#"{
@@ -877,7 +971,7 @@ mod tests {
             roll: Some(profile.clone()),
         };
 
-        let mut frame = PreparedFrame::new(artifact, profile);
+        let mut frame = PreparedFrame::new(artifact, profile).unwrap();
         frame.orientation = Orientation::Rotate180;
         frame.params.dmax = 3.25;
         frame.params.offset = 0.12;

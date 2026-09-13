@@ -47,19 +47,21 @@ fn phase12_gui_setup_and_custom_scan_request_builder() {
     assert_eq!(ultimate_req.samples, 16);
 
     // 4. Configure Film Profile: Kodak Portra 400
-    app.scan_setup.film_stock_index = 1;
+    app.scan_setup.set_film_stock_index(1);
     let portra_req = app.build_scan_request();
     assert_eq!(
         portra_req.roll.as_ref().unwrap().film_stock,
         "Kodak Portra 400"
     );
     assert_eq!(portra_req.roll.as_ref().unwrap().id.0, "kodak-portra-400");
+    assert!(!portra_req.roll.as_ref().unwrap().is_calibrated());
 
     // 5. Configure Film Profile: Kodak Gold 200
-    app.scan_setup.film_stock_index = 2;
+    app.scan_setup.set_film_stock_index(2);
     let gold_req = app.build_scan_request();
     assert_eq!(gold_req.roll.as_ref().unwrap().film_stock, "Kodak Gold 200");
     assert_eq!(gold_req.roll.as_ref().unwrap().id.0, "kodak-gold-200");
+    assert!(!gold_req.roll.as_ref().unwrap().is_calibrated());
 
     // 6. Advanced Controls: Custom samples slider (e.g. 8x), travel offset (+1.5 mm), manual frames (frames 2 and 5)
     app.scan_setup.quality = QualityPreset::Custom;
@@ -94,13 +96,21 @@ fn phase12_start_scan_syncs_session_roll_and_dispatches_to_worker() {
 
     assert_eq!(app.session.roll.film_stock, "Kodak Pro Image 100");
 
-    // Select Kodak Portra 400 and start scan
-    app.scan_setup.film_stock_index = 1;
+    // 1. Attempting to scan with uncalibrated Portra 400 is blocked
+    app.scan_setup.set_film_stock_index(1);
     app.scan_setup.show_setup_modal = true;
     app.start_scan();
 
-    // Verify session roll was updated to Portra 400 and scanning flag set
-    assert_eq!(app.session.roll.film_stock, "Kodak Portra 400");
+    assert!(!app.is_scanning);
+    assert!(app.status_message.contains("uncalibrated"));
+    assert!(app.scan_setup.show_setup_modal);
+
+    // 2. Select calibrated Kodak Pro Image 100 and start scan
+    app.scan_setup.set_film_stock_index(0);
+    app.start_scan();
+
+    // Verify session roll was updated to Pro Image 100 and scanning flag set
+    assert_eq!(app.session.roll.film_stock, "Kodak Pro Image 100");
     assert!(app.is_scanning);
     assert!(!app.scan_setup.show_setup_modal);
     assert_eq!(app.status_message, "Starting scan...");

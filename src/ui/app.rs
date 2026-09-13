@@ -41,6 +41,7 @@ pub struct ScanSetupState {
     pub quality: QualityPreset,
     pub output_dir_str: String,
     pub film_stock_index: usize,
+    pub roll_profile: RollProfile,
 
     // Advanced Controls
     pub show_setup_modal: bool,
@@ -61,6 +62,7 @@ impl Default for ScanSetupState {
             quality: QualityPreset::Standard,
             output_dir_str: "./scans".into(),
             film_stock_index: 0,
+            roll_profile: RollProfile::pro_image_100(),
             show_setup_modal: false,
             show_advanced: false,
             samples: 1,
@@ -70,6 +72,44 @@ impl Default for ScanSetupState {
             scanner_offset_mm: 0.0,
             last_discovery: None,
         }
+    }
+}
+
+impl ScanSetupState {
+    /// Creates a scan setup configured for a specific roll profile.
+    pub fn for_roll(roll: RollProfile) -> Self {
+        let film_stock_index = if roll.id.0 == "kodak-pro-image-100"
+            || roll.film_stock.name == "Kodak Pro Image 100"
+        {
+            0
+        } else if roll.id.0 == "kodak-portra-400" || roll.film_stock.name == "Kodak Portra 400" {
+            1
+        } else if roll.id.0 == "kodak-gold-200" || roll.film_stock.name == "Kodak Gold 200" {
+            2
+        } else {
+            3
+        };
+        Self {
+            film_stock_index,
+            roll_profile: roll,
+            ..Self::default()
+        }
+    }
+
+    /// Updates the selected preset film stock index and updates the internal roll profile.
+    pub fn set_film_stock_index(&mut self, index: usize) {
+        self.film_stock_index = index;
+        self.roll_profile = match index {
+            0 => RollProfile::pro_image_100(),
+            1 => RollProfile::portra_400(),
+            2 => RollProfile::gold_200(),
+            _ => self.roll_profile.clone(),
+        };
+    }
+
+    /// Returns the active roll profile for scanning.
+    pub fn selected_roll(&self) -> RollProfile {
+        self.roll_profile.clone()
     }
 }
 
@@ -104,7 +144,9 @@ pub struct ReviewApp {
 impl ReviewApp {
     /// Creates a new review GUI app from a review session.
     pub fn new(session: ReviewSession) -> Self {
+        let scan_setup = ScanSetupState::for_roll(session.roll.clone());
         Self {
+            scan_setup,
             session,
             preview_texture: None,
             drag_start: None,
@@ -116,7 +158,6 @@ impl ReviewApp {
             status_message: "Ready".into(),
             output_dir: PathBuf::from("./scans"),
             save_notification: None,
-            scan_setup: ScanSetupState::default(),
         }
     }
 
@@ -200,8 +241,9 @@ impl ReviewApp {
                 },
                 WorkerMessage::FrameReady(prepared) => {
                     let was_empty = self.session.frames.is_empty();
-                    let _ = self.session.add_prepared_frame(*prepared);
-                    if was_empty {
+                    if let Err(e) = self.session.add_prepared_frame(*prepared) {
+                        self.status_message = format!("Frame processing error: {e}");
+                    } else if was_empty {
                         self.session.current_index = 0;
                         self.invalidate_texture();
                     }
@@ -212,7 +254,9 @@ impl ReviewApp {
                 }
                 WorkerMessage::StripScanComplete => {
                     self.is_scanning = false;
-                    self.status_message = "Scan complete — ready for review".into();
+                    if !self.session.frames.is_empty() {
+                        self.status_message = "Scan complete — ready for review".into();
+                    }
                 }
                 WorkerMessage::ScanCancelled { reason } => {
                     self.is_scanning = false;
@@ -253,11 +297,7 @@ impl ReviewApp {
             QualityPreset::Custom => self.scan_setup.samples,
         };
 
-        let roll = match self.scan_setup.film_stock_index {
-            1 => RollProfile::portra_400(),
-            2 => RollProfile::gold_200(),
-            _ => RollProfile::pro_image_100(),
-        };
+        let roll = self.scan_setup.selected_roll();
 
         ScanRequest::new(
             frames,
@@ -278,6 +318,13 @@ impl ReviewApp {
             return;
         }
         if let Some(roll) = &req.roll {
+            if !roll.is_calibrated() {
+                self.status_message = format!(
+                    "Cannot scan: film stock '{}' is uncalibrated (D-min calibration required)",
+                    roll.name
+                );
+                return;
+            }
             self.session.roll = roll.clone();
         }
         if let Some(worker) = &self.worker {
@@ -376,40 +423,64 @@ impl ReviewApp {
                 // Film profile
                 ui.horizontal(|ui| {
                     ui.label("Film Stock:");
+                    let current_text = match self.scan_setup.film_stock_index {
+                        0 => "Kodak Pro Image 100".to_string(),
+                        1 => "Kodak Portra 400".to_string(),
+                        2 => "Kodak Gold 200".to_string(),
+                        _ => format!("Custom: {}", self.scan_setup.roll_profile.name),
+                    };
                     egui::ComboBox::from_id_salt("film_stock_combo")
-                        .selected_text(match self.scan_setup.film_stock_index {
-                            1 => "Kodak Portra 400",
-                            2 => "Kodak Gold 200",
-                            _ => "Kodak Pro Image 100",
-                        })
+                        .selected_text(current_text)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.scan_setup.film_stock_index,
-                                0,
-                                "Kodak Pro Image 100",
-                            );
-                            ui.selectable_value(
-                                &mut self.scan_setup.film_stock_index,
-                                1,
-                                "Kodak Portra 400",
-                            );
-                            ui.selectable_value(
-                                &mut self.scan_setup.film_stock_index,
-                                2,
-                                "Kodak Gold 200",
-                            );
+                            if ui
+                                .selectable_label(
+                                    self.scan_setup.film_stock_index == 0,
+                                    "Kodak Pro Image 100",
+                                )
+                                .clicked()
+                            {
+                                self.scan_setup.set_film_stock_index(0);
+                                self.session.roll = self.scan_setup.selected_roll();
+                            }
+                            if ui
+                                .selectable_label(
+                                    self.scan_setup.film_stock_index == 1,
+                                    "Kodak Portra 400",
+                                )
+                                .clicked()
+                            {
+                                self.scan_setup.set_film_stock_index(1);
+                                self.session.roll = self.scan_setup.selected_roll();
+                            }
+                            if ui
+                                .selectable_label(
+                                    self.scan_setup.film_stock_index == 2,
+                                    "Kodak Gold 200",
+                                )
+                                .clicked()
+                            {
+                                self.scan_setup.set_film_stock_index(2);
+                                self.session.roll = self.scan_setup.selected_roll();
+                            }
+                            if self.scan_setup.film_stock_index > 2 {
+                                let label =
+                                    format!("Custom: {}", self.scan_setup.roll_profile.name);
+                                let _ = ui.selectable_label(true, label);
+                            }
                         });
                 });
 
-                let (status_text, status_color) = match self.scan_setup.film_stock_index {
-                    0 => (
+                let (status_text, status_color) = if self.scan_setup.selected_roll().is_calibrated()
+                {
+                    (
                         "Measured roll profile loaded",
                         Color32::from_rgb(120, 220, 120),
-                    ),
-                    _ => (
+                    )
+                } else {
+                    (
                         "D-min calibration required",
                         Color32::from_rgb(255, 180, 100),
-                    ),
+                    )
                 };
                 ui.horizontal(|ui| {
                     ui.label("Calibration:");
@@ -507,17 +578,24 @@ impl ReviewApp {
 
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
+                    let is_calibrated = self.scan_setup.selected_roll().is_calibrated();
+                    let can_scan = self.worker.is_some() && is_calibrated;
                     let start_btn =
                         Button::new(RichText::new("▶ Start Scan").color(Color32::WHITE).strong())
                             .fill(Color32::from_rgb(40, 160, 60));
 
-                    if ui.add_enabled(self.worker.is_some(), start_btn).clicked() {
+                    if ui.add_enabled(can_scan, start_btn).clicked() {
                         self.start_scan();
                     }
                     if self.worker.is_none() {
                         ui.colored_label(
                             Color32::from_rgb(200, 160, 100),
                             "(No scanner connected)",
+                        );
+                    } else if !is_calibrated {
+                        ui.colored_label(
+                            Color32::from_rgb(255, 180, 100),
+                            "(D-min calibration required)",
                         );
                     }
 
@@ -629,13 +707,14 @@ impl eframe::App for ReviewApp {
                             w.stop_after_current();
                         }
                     } else {
-                        if ui
-                            .button(
-                                RichText::new("▶ Scan Strip")
-                                    .color(Color32::from_rgb(120, 240, 120)),
-                            )
-                            .clicked()
-                        {
+                        let is_calibrated = self.scan_setup.selected_roll().is_calibrated();
+                        let scan_btn =
+                            Button::new(RichText::new("▶ Scan Strip").color(if is_calibrated {
+                                Color32::from_rgb(120, 240, 120)
+                            } else {
+                                Color32::from_rgb(160, 160, 160)
+                            }));
+                        if ui.add_enabled(is_calibrated, scan_btn).clicked() {
                             self.start_scan();
                         }
                         if ui.button("⚙ Setup").clicked() {
@@ -976,17 +1055,24 @@ impl ReviewApp {
                         );
                         ui.add_space(12.0);
                         ui.horizontal(|ui| {
+                            let is_calibrated = self.scan_setup.selected_roll().is_calibrated();
+                            let can_scan = self.worker.is_some() && is_calibrated;
                             let scan_btn = Button::new(
                                 RichText::new("▶ Scan Strip").color(Color32::WHITE).strong(),
                             )
                             .fill(Color32::from_rgb(40, 160, 60));
-                            if ui.add_enabled(self.worker.is_some(), scan_btn).clicked() {
+                            if ui.add_enabled(can_scan, scan_btn).clicked() {
                                 self.start_scan();
                             }
                             if self.worker.is_none() {
                                 ui.colored_label(
                                     Color32::from_rgb(200, 160, 100),
                                     "(No scanner connected)",
+                                );
+                            } else if !is_calibrated {
+                                ui.colored_label(
+                                    Color32::from_rgb(255, 180, 100),
+                                    "(D-min calibration required)",
                                 );
                             }
                             if ui.button("⚙ Scan Settings").clicked() {
@@ -1243,5 +1329,30 @@ mod tests {
         let req = app.build_scan_request();
         assert_eq!(req.frames, FrameSelection::List(vec![2, 4, 6]));
         assert_eq!(req.validate(), Ok(()));
+    }
+
+    #[test]
+    fn test_uncalibrated_roll_scan_is_blocked() {
+        let mut app = test_app();
+        app.scan_setup.set_film_stock_index(1); // Portra 400 (uncalibrated)
+        assert!(!app.scan_setup.selected_roll().is_calibrated());
+
+        app.start_scan();
+        assert!(!app.is_scanning);
+        assert!(app.status_message.contains("uncalibrated"));
+    }
+
+    #[test]
+    fn test_custom_roll_profile_preserved() {
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let custom_roll =
+            RollProfile::new("my-custom-roll", "My Custom Film", "Custom Stock", None).unwrap();
+        let session = ReviewSession::empty(custom_roll.clone(), pipeline);
+        let app = ReviewApp::new(session);
+
+        assert_eq!(app.scan_setup.selected_roll().id.0, "my-custom-roll");
+        assert_eq!(app.scan_setup.film_stock_index, 3);
+        let req = app.build_scan_request();
+        assert_eq!(req.roll.unwrap().id.0, "my-custom-roll");
     }
 }
