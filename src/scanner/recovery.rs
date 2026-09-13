@@ -1,5 +1,5 @@
-use std::time::Duration;
 use nkscan::{device::Device, protocol::data::BoundaryType2, session::Session};
+use std::time::Duration;
 
 /// Maximum scan attempts per frame before skipping.
 pub const MAX_SCAN_ATTEMPTS: usize = 2;

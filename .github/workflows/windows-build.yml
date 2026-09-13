@@ -1,0 +1,49 @@
+name: Windows Build
+
+on:
+  push:
+    branches:
+      - main
+      - stabilisation
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows stable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --all-targets --all-features --locked
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: coolscan-studio-windows
+          path: target/release/coolscan-studio.exe
+          if-no-files-found: error

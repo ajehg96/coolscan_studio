@@ -3,11 +3,10 @@ pub mod boundaries;
 pub mod cli;
 pub mod crop;
 pub mod darktable;
+pub mod diagnostics;
 pub mod frame_position;
 pub mod output;
 pub mod processing;
 pub mod scanner;
 pub mod tiff;
 pub mod ui;
-pub mod diagnostics;
-

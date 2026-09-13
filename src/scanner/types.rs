@@ -56,7 +56,7 @@ impl std::fmt::Display for ScanRequestError {
                 write!(f, "Invalid DPI: {dpi}. Supported range is 90 to 2900 DPI.")
             }
             ScanRequestError::InvalidSamples(s) => {
-                write!(f, "Invalid sample count: {s}. Must be between 1 and 64.")
+                write!(f, "Invalid sample count: {s}. Must be between 1 and 16.")
             }
             ScanRequestError::InvalidFrameNumber(n) => {
                 write!(f, "Invalid frame number: {n}. Frames are numbered from 1.")
@@ -105,7 +105,7 @@ impl ScanRequest {
         if self.dpi < 90 || self.dpi > 2900 {
             return Err(ScanRequestError::InvalidDpi(self.dpi));
         }
-        if self.samples == 0 || self.samples > 64 {
+        if self.samples == 0 || self.samples > 16 {
             return Err(ScanRequestError::InvalidSamples(self.samples));
         }
         match &self.frames {
@@ -246,12 +246,8 @@ impl FrameArtifact {
         if let Some(crop) = &self.crop
             && crop.accepted
         {
-            let (s, p) = crate::bmp::crop_samples(
-                &self.samples,
-                &self.pass,
-                crop.rows,
-                crop.columns,
-            )?;
+            let (s, p) =
+                crate::bmp::crop_samples(&self.samples, &self.pass, crop.rows, crop.columns)?;
             return Ok(EffectiveImage::Cropped(s, p));
         }
         Ok(EffectiveImage::Master(&self.samples, &self.pass))
@@ -424,13 +420,25 @@ mod tests {
         assert!(valid.validate().is_ok());
 
         let invalid_dpi = ScanRequest::new(FrameSelection::All, 50, 1, false, true);
-        assert_eq!(invalid_dpi.validate(), Err(ScanRequestError::InvalidDpi(50)));
-
-        let invalid_samples = ScanRequest::new(FrameSelection::All, 725, 0, false, true);
         assert_eq!(
-            invalid_samples.validate(),
+            invalid_dpi.validate(),
+            Err(ScanRequestError::InvalidDpi(50))
+        );
+
+        let invalid_samples_zero = ScanRequest::new(FrameSelection::All, 725, 0, false, true);
+        assert_eq!(
+            invalid_samples_zero.validate(),
             Err(ScanRequestError::InvalidSamples(0))
         );
+
+        let invalid_samples_high = ScanRequest::new(FrameSelection::All, 725, 17, false, true);
+        assert_eq!(
+            invalid_samples_high.validate(),
+            Err(ScanRequestError::InvalidSamples(17))
+        );
+
+        let valid_samples_16 = ScanRequest::new(FrameSelection::All, 725, 16, false, true);
+        assert!(valid_samples_16.validate().is_ok());
 
         let invalid_frame = ScanRequest::new(FrameSelection::Specific(0), 725, 1, false, true);
         assert_eq!(
@@ -439,10 +447,7 @@ mod tests {
         );
 
         let empty_list = ScanRequest::new(FrameSelection::List(vec![]), 725, 1, false, true);
-        assert_eq!(
-            empty_list.validate(),
-            Err(ScanRequestError::EmptyFrameList)
-        );
+        assert_eq!(empty_list.validate(), Err(ScanRequestError::EmptyFrameList));
     }
 
     #[test]
@@ -474,7 +479,12 @@ mod tests {
             frame_number: 1,
             total_frames: 1,
             dpi: 725,
-            raw_rect: Rect { left: 0, right: 4, top: 0, bottom: 4 },
+            raw_rect: Rect {
+                left: 0,
+                right: 4,
+                top: 0,
+                bottom: 4,
+            },
             samples,
             pass,
             crop: None,
@@ -503,8 +513,14 @@ mod tests {
             ir: None,
         };
         let crop = crate::crop::CropDecision {
-            leading: crate::crop::EdgeConfidence::Confident { column: 1, dots: 100 },
-            trailing: crate::crop::EdgeConfidence::Confident { column: 3, dots: 300 },
+            leading: crate::crop::EdgeConfidence::Confident {
+                column: 1,
+                dots: 100,
+            },
+            trailing: crate::crop::EdgeConfidence::Confident {
+                column: 3,
+                dots: 300,
+            },
             columns: (1, 3),
             rows: (1, 3),
             travel_dots: (100, 300),
@@ -515,7 +531,12 @@ mod tests {
             frame_number: 1,
             total_frames: 1,
             dpi: 725,
-            raw_rect: Rect { left: 0, right: 4, top: 0, bottom: 4 },
+            raw_rect: Rect {
+                left: 0,
+                right: 4,
+                top: 0,
+                bottom: 4,
+            },
             samples,
             pass,
             crop: Some(crop),
@@ -542,8 +563,8 @@ mod tests {
     #[test]
     fn scan_request_with_roll_profile() {
         let roll = RollProfile::pro_image_100();
-        let request = ScanRequest::new(FrameSelection::All, 2900, 1, true, true)
-            .with_roll(roll.clone());
+        let request =
+            ScanRequest::new(FrameSelection::All, 2900, 1, true, true).with_roll(roll.clone());
         assert_eq!(request.roll, Some(roll));
     }
 }

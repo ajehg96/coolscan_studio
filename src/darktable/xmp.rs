@@ -81,7 +81,7 @@ impl DarktableParamCodec {
     /// Decodes a hexadecimal string to binary bytes.
     pub fn decode_hex(s: &str) -> Result<Vec<u8>, DarktableError> {
         let clean = s.trim();
-        if clean.len() % 2 != 0 {
+        if !clean.len().is_multiple_of(2) {
             return Err(DarktableError::HexDecodeError(
                 "Hex string length must be even".into(),
             ));
@@ -126,8 +126,9 @@ impl DarktableParamCodec {
             .decode(b64_part)
             .map_err(|e| DarktableError::CompressionError(format!("Base64 decode error: {e}")))?;
 
-        miniz_oxide::inflate::decompress_to_vec_zlib(&compressed)
-            .map_err(|e| DarktableError::CompressionError(format!("Zlib decompression error: {e:?}")))
+        miniz_oxide::inflate::decompress_to_vec_zlib(&compressed).map_err(|e| {
+            DarktableError::CompressionError(format!("Zlib decompression error: {e:?}"))
+        })
     }
 
     /// Automatically decodes either `gz...` or hexadecimal parameter strings.
@@ -423,6 +424,7 @@ impl DarktableXmp {
     /// 4: colorin (calibrated input ICC profile)
     /// 5: negadoctor (calibrated inversion parameters)
     /// 6: flip (if orientation is not Normal)
+    #[allow(clippy::vec_init_then_push)]
     pub fn for_frame(
         derived_from: &str,
         input_profile_name_or_path: &str,
@@ -828,12 +830,13 @@ impl DarktableXmp {
     /// Extracts the active orientation from the latest `flip` history item.
     pub fn extract_orientation(&self) -> Orientation {
         for item in self.history.iter().rev() {
-            if item.operation == "flip" && item.enabled && item.params != FLIP_AUTO_PARAMS {
-                if let Ok(flip) = FlipParams::from_hex(&item.params) {
-                    if let Some(orient) = flip.to_orientation() {
-                        return orient;
-                    }
-                }
+            if item.operation == "flip"
+                && item.enabled
+                && item.params != FLIP_AUTO_PARAMS
+                && let Ok(flip) = FlipParams::from_hex(&item.params)
+                && let Some(orient) = flip.to_orientation()
+            {
+                return orient;
             }
         }
         Orientation::Normal
@@ -842,14 +845,13 @@ impl DarktableXmp {
     /// Extracts the configured input ICC profile name or path from the latest `colorin` item.
     pub fn extract_colorin_profile(&self) -> Option<String> {
         for item in self.history.iter().rev() {
-            if item.operation == "colorin" && item.enabled {
-                if let Ok(bytes) = DarktableParamCodec::decode_param(&item.params) {
-                    if let Ok(colorin) = ColorinParams::from_bytes(&bytes) {
-                        if !colorin.filename.is_empty() {
-                            return Some(colorin.filename);
-                        }
-                    }
-                }
+            if item.operation == "colorin"
+                && item.enabled
+                && let Ok(bytes) = DarktableParamCodec::decode_param(&item.params)
+                && let Ok(colorin) = ColorinParams::from_bytes(&bytes)
+                && !colorin.filename.is_empty()
+            {
+                return Some(colorin.filename);
             }
         }
         None

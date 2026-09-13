@@ -35,20 +35,22 @@ impl SystemDiagnostics {
     pub fn probe() -> Self {
         // 1. Probe scanner hardware via nkscan / libusb
         let scanners = nkscan::device::list();
-        let (scanner_detected, scanner_model, driver_status) = if let Some(scanner) = scanners.first() {
-            let desc = scanner.to_string();
-            (
-                true,
-                Some(desc.clone()),
-                format!("Connected and accessible via USB: {desc}"),
-            )
-        } else {
-            (
-                false,
-                None,
-                "No scanner found. If connected, ensure WinUSB driver is assigned via Zadig.".into(),
-            )
-        };
+        let (scanner_detected, scanner_model, driver_status) =
+            if let Some(scanner) = scanners.first() {
+                let desc = scanner.to_string();
+                (
+                    true,
+                    Some(desc.clone()),
+                    format!("Connected and accessible via USB: {desc}"),
+                )
+            } else {
+                (
+                    false,
+                    None,
+                    "No scanner found. If connected, ensure WinUSB driver is assigned via Zadig."
+                        .into(),
+                )
+            };
 
         // 2. Probe Darktable CLI installation
         let darktable_path = detect_darktable_cli();
@@ -57,10 +59,12 @@ impl SystemDiagnostics {
             .and_then(|p| query_darktable_version(p));
 
         // 3. Probe LittleCMS 2 color management
-        let color_engine_info = match crate::processing::color::ScannerColorPipeline::default_ls40() {
-            Ok(_) => "LittleCMS 2.16 (statically linked, Rec.2020 working space, sRGB display)".into(),
-            Err(e) => format!("Color pipeline error: {e}"),
-        };
+        let color_engine_info =
+            match crate::processing::color::ScannerColorPipeline::default_ls40() {
+                Ok(_) => "LittleCMS 2.16 (statically linked, Rec.2020 working space, sRGB display)"
+                    .into(),
+                Err(e) => format!("Color pipeline error: {e}"),
+            };
 
         // 4. Resolve standard config and output paths
         let config_directory = resolve_app_config_dir();
@@ -101,7 +105,10 @@ impl SystemDiagnostics {
 
         out.push_str("2. Darktable Integration:\n");
         if let Some(path) = &self.darktable_path {
-            out.push_str(&format!("   [✓] darktable-cli detected: {}\n", path.display()));
+            out.push_str(&format!(
+                "   [✓] darktable-cli detected: {}\n",
+                path.display()
+            ));
             if let Some(ver) = &self.darktable_version {
                 out.push_str(&format!("   Version: {}\n", ver));
             }
@@ -109,7 +116,9 @@ impl SystemDiagnostics {
         } else {
             out.push_str("   [!] darktable-cli not found in standard paths.\n");
             out.push_str("   Notice: Install Darktable (https://www.darktable.org) to\n");
-            out.push_str("           enable automatic render testing and direct raw development.\n");
+            out.push_str(
+                "           enable automatic render testing and direct raw development.\n",
+            );
         }
         out.push('\n');
 
@@ -117,8 +126,14 @@ impl SystemDiagnostics {
         out.push_str(&format!("   [✓] {}\n\n", self.color_engine_info));
 
         out.push_str("4. File Storage Paths:\n");
-        out.push_str(&format!("   Preferences dir: {}\n", self.config_directory.display()));
-        out.push_str(&format!("   Default export:  {}\n", self.default_output_directory.display()));
+        out.push_str(&format!(
+            "   Preferences dir: {}\n",
+            self.config_directory.display()
+        ));
+        out.push_str(&format!(
+            "   Default export:  {}\n",
+            self.default_output_directory.display()
+        ));
         out.push_str("====================================================\n");
 
         out
@@ -133,7 +148,9 @@ impl SystemDiagnostics {
 /// Detects the Darktable CLI executable location across environment variables, standard paths, and PATH.
 pub fn detect_darktable_cli() -> Option<PathBuf> {
     // 1. Check DARKTABLE_PATH or DARKTABLE_CLI environment variable
-    if let Ok(env_path) = std::env::var("DARKTABLE_PATH").or_else(|_| std::env::var("DARKTABLE_CLI")) {
+    if let Ok(env_path) =
+        std::env::var("DARKTABLE_PATH").or_else(|_| std::env::var("DARKTABLE_CLI"))
+    {
         let p = PathBuf::from(env_path);
         if p.is_file() {
             return Some(p);
@@ -167,10 +184,10 @@ pub fn detect_darktable_cli() -> Option<PathBuf> {
     }
 
     // 4. Try resolving darktable-cli in PATH
-    if let Ok(output) = Command::new("darktable-cli").arg("--version").output() {
-        if output.status.success() {
-            return Some(PathBuf::from("darktable-cli"));
-        }
+    if let Ok(output) = Command::new("darktable-cli").arg("--version").output()
+        && output.status.success()
+    {
+        return Some(PathBuf::from("darktable-cli"));
     }
 
     None
@@ -206,7 +223,9 @@ pub fn resolve_app_config_dir() -> PathBuf {
 /// Resolves standard default destination directory for scanned outputs.
 pub fn resolve_default_output_dir() -> PathBuf {
     if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        let pictures = PathBuf::from(userprofile).join("Pictures").join("CoolscanStudio");
+        let pictures = PathBuf::from(userprofile)
+            .join("Pictures")
+            .join("CoolscanStudio");
         if pictures.parent().map(|p| p.exists()).unwrap_or(false) {
             return pictures;
         }

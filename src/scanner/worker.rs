@@ -7,10 +7,10 @@
 //! - Pure mock backend (`MockScannerBackend`) enabling 100% headless end-to-end GUI workflow testing
 //!   without physical LS-40 hardware.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
-use std::thread::{spawn, JoinHandle};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::thread::{JoinHandle, spawn};
 use std::time::Duration;
 
 use nkscan::protocol::data::Rect;
@@ -109,7 +109,12 @@ impl MockScannerBackend {
         }
     }
 
-    fn synthesize_canned_frame(&self, frame_number: usize, width: usize, height: usize) -> PreparedFrame {
+    fn synthesize_canned_frame(
+        &self,
+        frame_number: usize,
+        width: usize,
+        height: usize,
+    ) -> PreparedFrame {
         let mut red = vec![10000u16; width * height];
         let mut green = vec![12000u16; width * height];
         let mut blue = vec![9000u16; width * height];
@@ -138,7 +143,11 @@ impl MockScannerBackend {
         };
 
         let pass = Pass {
-            layout: nkscan::protocol::image::Layout::single_line(height as u32, width as u32, vec![1]),
+            layout: nkscan::protocol::image::Layout::single_line(
+                height as u32,
+                width as u32,
+                vec![1],
+            ),
             cooperation: Vec::new(),
             complete: true,
             blocks: 1,
@@ -147,17 +156,14 @@ impl MockScannerBackend {
         };
 
         let crop = CropDecision {
-            leading: EdgeConfidence::Confident {
-                column: 0,
-                dots: 0,
-            },
+            leading: EdgeConfidence::Confident { column: 0, dots: 0 },
             trailing: EdgeConfidence::Confident {
-                column: width - 1,
-                dots: (width - 1) as u32,
+                column: width,
+                dots: width as u32,
             },
-            columns: (0, width - 1),
-            rows: (0, height - 1),
-            travel_dots: (0, (width - 1) as u32),
+            columns: (0, width),
+            rows: (0, height),
+            travel_dots: (0, width as u32),
             accepted: true,
             is_blank: false,
         };
@@ -202,10 +208,7 @@ impl MockScannerBackend {
             roll: self.roll_profile.clone(),
             orientation: Orientation::Normal,
             params,
-            technical: TechnicalAnalysis {
-                dmax,
-                scan_bias,
-            },
+            technical: TechnicalAnalysis { dmax, scan_bias },
             highlight_wb_rect: None,
         }
     }
@@ -217,7 +220,9 @@ impl ScannerBackend for MockScannerBackend {
             description: "Nikon COOLSCAN IV ED (Mocked)".into(),
         }));
         emit(WorkerMessage::Event(ScanEvent::SessionReady));
-        emit(WorkerMessage::Event(ScanEvent::MediaChecked { loaded: true }));
+        emit(WorkerMessage::Event(ScanEvent::MediaChecked {
+            loaded: true,
+        }));
     }
 
     fn discover_strip(&mut self, emit: &mut dyn FnMut(WorkerMessage)) {
@@ -354,7 +359,9 @@ impl ScannerBackend for HardwareScannerBackend {
     fn check_media(&mut self, emit: &mut dyn FnMut(WorkerMessage)) {
         let scanners = nkscan::device::list();
         let Some(scanner) = scanners.first() else {
-            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            emit(WorkerMessage::Error(
+                "No Nikon Coolscan scanners found.".into(),
+            ));
             return;
         };
 
@@ -373,7 +380,9 @@ impl ScannerBackend for HardwareScannerBackend {
         let mut session = match Session::open(transport) {
             Ok(s) => s,
             Err(e) => {
-                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                emit(WorkerMessage::Error(format!(
+                    "Failed to start scanner session: {e}"
+                )));
                 return;
             }
         };
@@ -382,14 +391,18 @@ impl ScannerBackend for HardwareScannerBackend {
 
         match session.media_loaded() {
             Ok(loaded) => emit(WorkerMessage::Event(ScanEvent::MediaChecked { loaded })),
-            Err(e) => emit(WorkerMessage::Error(format!("Could not check media state: {e}"))),
+            Err(e) => emit(WorkerMessage::Error(format!(
+                "Could not check media state: {e}"
+            ))),
         }
     }
 
     fn discover_strip(&mut self, emit: &mut dyn FnMut(WorkerMessage)) {
         let scanners = nkscan::device::list();
         let Some(scanner) = scanners.first() else {
-            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            emit(WorkerMessage::Error(
+                "No Nikon Coolscan scanners found.".into(),
+            ));
             return;
         };
 
@@ -404,7 +417,9 @@ impl ScannerBackend for HardwareScannerBackend {
         let mut session = match Session::open(transport) {
             Ok(s) => s,
             Err(e) => {
-                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                emit(WorkerMessage::Error(format!(
+                    "Failed to start scanner session: {e}"
+                )));
                 return;
             }
         };
@@ -426,7 +441,9 @@ impl ScannerBackend for HardwareScannerBackend {
     ) {
         let scanners = nkscan::device::list();
         let Some(scanner) = scanners.first() else {
-            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            emit(WorkerMessage::Error(
+                "No Nikon Coolscan scanners found.".into(),
+            ));
             return;
         };
 
@@ -441,12 +458,17 @@ impl ScannerBackend for HardwareScannerBackend {
         let session = match Session::open(transport) {
             Ok(s) => s,
             Err(e) => {
-                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                emit(WorkerMessage::Error(format!(
+                    "Failed to start scanner session: {e}"
+                )));
                 return;
             }
         };
 
-        let roll = request.roll.clone().unwrap_or_else(|| self.roll_profile.clone());
+        let roll = request
+            .roll
+            .clone()
+            .unwrap_or_else(|| self.roll_profile.clone());
         let default_pipeline;
         let pipeline: &ScannerColorPipeline = match &self.color_pipeline {
             Some(p) => p,
@@ -477,7 +499,9 @@ impl ScannerBackend for HardwareScannerBackend {
                 for artifact in result.frames {
                     match PreparedFrame::from_artifact(artifact, roll.clone(), pipeline) {
                         Ok(prepared) => emit(WorkerMessage::FrameReady(Box::new(prepared))),
-                        Err(e) => emit(WorkerMessage::Error(format!("Frame preparation error: {e}"))),
+                        Err(e) => emit(WorkerMessage::Error(format!(
+                            "Frame preparation error: {e}"
+                        ))),
                     }
                 }
                 emit(WorkerMessage::StripScanComplete);
@@ -491,7 +515,9 @@ impl ScannerBackend for HardwareScannerBackend {
     fn eject_film(&mut self, emit: &mut dyn FnMut(WorkerMessage)) {
         let scanners = nkscan::device::list();
         let Some(scanner) = scanners.first() else {
-            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            emit(WorkerMessage::Error(
+                "No Nikon Coolscan scanners found.".into(),
+            ));
             return;
         };
 
@@ -506,7 +532,9 @@ impl ScannerBackend for HardwareScannerBackend {
         let mut session = match Session::open(transport) {
             Ok(s) => s,
             Err(e) => {
-                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                emit(WorkerMessage::Error(format!(
+                    "Failed to start scanner session: {e}"
+                )));
                 return;
             }
         };
@@ -684,10 +712,8 @@ mod tests {
 
     #[test]
     fn mock_backend_cancellation_current_frame() {
-        let handle = ScannerWorkerHandle::spawn(MockScannerBackend::new(
-            6,
-            Duration::from_millis(50),
-        ));
+        let handle =
+            ScannerWorkerHandle::spawn(MockScannerBackend::new(6, Duration::from_millis(50)));
 
         let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
         handle.send(ScanCommand::StartScan(req));
@@ -711,10 +737,8 @@ mod tests {
 
     #[test]
     fn mock_backend_stop_after_current_frame() {
-        let handle = ScannerWorkerHandle::spawn(MockScannerBackend::new(
-            6,
-            Duration::from_millis(60),
-        ));
+        let handle =
+            ScannerWorkerHandle::spawn(MockScannerBackend::new(6, Duration::from_millis(60)));
 
         let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
         handle.send(ScanCommand::StartScan(req));
@@ -732,11 +756,11 @@ mod tests {
                     WorkerMessage::FrameReady(_) => {
                         frames_received += 1;
                     }
-                    WorkerMessage::ScanCancelled { reason } => {
-                        if reason.contains("Stopped after current frame") {
-                            stopped = true;
-                            break;
-                        }
+                    WorkerMessage::ScanCancelled { reason }
+                        if reason.contains("Stopped after current frame") =>
+                    {
+                        stopped = true;
+                        break;
                     }
                     _ => {}
                 }
@@ -745,7 +769,10 @@ mod tests {
         }
 
         assert!(stopped, "Scan should have stopped after current frame");
-        assert_eq!(frames_received, 1, "Should have acquired only 1 frame before stopping");
+        assert_eq!(
+            frames_received, 1,
+            "Should have acquired only 1 frame before stopping"
+        );
     }
 
     #[test]

@@ -1,4 +1,3 @@
-use std::thread::sleep;
 use nkscan::{
     device::Device,
     protocol::{
@@ -6,22 +5,19 @@ use nkscan::{
         data::{BoundaryType2, Rect},
         decode::Samples,
     },
-    scan::{
-        boundaries::Polarity,
-        clean, frame, framing,
-        window::Recipe,
-    },
+    scan::{boundaries::Polarity, clean, frame, framing, window::Recipe},
     session::Session,
 };
+use std::thread::sleep;
 
 use crate::{
     boundaries,
     crop::{CropDecision, CropOptions},
     scanner::{
-        recovery::{refresh_session, INTER_FRAME_DELAY, MAX_SCAN_ATTEMPTS, RETRY_DELAY},
+        recovery::{INTER_FRAME_DELAY, MAX_SCAN_ATTEMPTS, RETRY_DELAY, refresh_session},
         types::{
-            CropFallbackReason, FrameArtifact, ScanError, ScanEvent, ScanMetadata,
-            ScanPhase, ScanRequest, StripDiscovery, StripScanResult,
+            CropFallbackReason, FrameArtifact, ScanError, ScanEvent, ScanMetadata, ScanPhase,
+            ScanRequest, StripDiscovery, StripScanResult,
         },
     },
 };
@@ -44,14 +40,18 @@ pub fn setup_overscan_frames(
     x_start: u32,
     x_width: u32,
 ) -> Option<BoundaryType2> {
-    if !matches!(discovery.table, nkscan::protocol::data::FrameTable::BoundaryType2(_)) {
+    if !matches!(
+        discovery.table,
+        nkscan::protocol::data::FrameTable::BoundaryType2(_)
+    ) {
         return None;
     }
     let pass = discovery.thumbnail.as_ref()?;
     let image = nkscan::protocol::decode::Image::new(&pass.layout, samples).ok()?;
     let pitch = pass.layout.line_pitch;
     let nominal = (36.0 * f64::from(y_dpi) / 25.4) as u32 / pitch;
-    let found = boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
+    let found =
+        boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
 
     let raw_len = u32::try_from(found.length).ok()?;
     let raw_len_dots = raw_len.checked_mul(pitch)?;
@@ -136,7 +136,8 @@ pub fn configure_overscan(
 
     let pitch = thumbnail.layout.line_pitch;
     let nominal = (36.0 * f64::from(y_dpi) / 25.4) as u32 / pitch;
-    let found = boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
+    let found =
+        boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
 
     let raw_len = u32::try_from(found.length).ok()?;
     let raw_len_dots = raw_len.checked_mul(pitch)?;
@@ -249,7 +250,9 @@ pub fn scan_strip_with_session(
     let mut acquired_artifacts = Vec::new();
 
     for (seq_idx, &frame_num) in frames_to_scan.iter().enumerate() {
-        let frame_idx = frame_num.checked_sub(1).ok_or(ScanError::FrameUnavailable(frame_num))?;
+        let frame_idx = frame_num
+            .checked_sub(1)
+            .ok_or(ScanError::FrameUnavailable(frame_num))?;
         let Some(&rect) = strip_discovery.frames().get(frame_idx) else {
             progress(ScanEvent::FrameSkipped {
                 frame_number: frame_num,
@@ -268,7 +271,7 @@ pub fn scan_strip_with_session(
 
         let mut final_samples = None;
         let mut final_pass = None;
-        let mut first_scanned: Option<frame::Scanned> = None;
+        let mut final_exposures = None;
 
         for attempt in 1..=MAX_SCAN_ATTEMPTS {
             progress(ScanEvent::FrameAttemptStarted {
@@ -281,6 +284,7 @@ pub fn scan_strip_with_session(
             let mut accum_ir: Option<Vec<u64>> = None;
             let mut current_final_pass = None;
             let mut pass_succeeded = true;
+            let mut first_scanned: Option<frame::Scanned> = None;
 
             for pass_idx in 1..=software_passes {
                 progress(ScanEvent::FramePassStarted {
@@ -293,7 +297,9 @@ pub fn scan_strip_with_session(
                 let mut current_phase = None;
                 let mut last_pct = None;
                 let scan_opts = frame::Options {
-                    exposures: first_scanned.as_ref().map(|s: &frame::Scanned| &s.exposures),
+                    exposures: first_scanned
+                        .as_ref()
+                        .map(|s: &frame::Scanned| &s.exposures),
                     lock_white_balance: false,
                     clean: false,
                 };
@@ -402,6 +408,7 @@ pub fn scan_strip_with_session(
                     }),
                 });
                 final_pass = current_final_pass;
+                final_exposures = first_scanned.map(|s| s.exposures);
                 break;
             }
 
@@ -514,7 +521,7 @@ pub fn scan_strip_with_session(
                 .as_ref()
                 .and_then(|s| s.capabilities().identity.model().map(|m| format!("{m:?}"))),
             focus_position: None,
-            exposures: first_scanned.as_ref().map(|s| s.exposures.clone()),
+            exposures: final_exposures,
             hardware_samples,
             software_passes,
             infrared_cleaned_pixels: cleaned_pixels_count,
@@ -577,6 +584,10 @@ pub fn scan_strip_with_session(
                 }
             }
         }
+    }
+
+    if !frames_to_scan.is_empty() && acquired_artifacts.is_empty() {
+        return Err(ScanError::AllFramesFailed);
     }
 
     Ok(StripScanResult {

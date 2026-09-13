@@ -28,10 +28,16 @@ pub fn write_tiff(
     }
 
     let width = u32::try_from(pass.cols).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "image is too wide for TIFF")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "image is too wide for TIFF",
+        )
     })?;
     let height = u32::try_from(pass.rows).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "image is too tall for TIFF")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "image is too tall for TIFF",
+        )
     })?;
     let pixels = pass.rows.checked_mul(pass.cols).ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, "dimensions overflow")
@@ -54,7 +60,10 @@ pub fn write_tiff(
         .and_then(|px| px.checked_mul(samples_per_pixel as u32))
         .and_then(|s| s.checked_mul(bytes_per_sample))
         .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "TIFF image data size overflow")
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "TIFF image data size overflow",
+            )
         })?;
 
     let file = File::create(path)?;
@@ -95,13 +104,14 @@ pub fn write_tiff(
 
     // Helper to write a 12-byte IFD entry (Tag, Type, Count, Value/Offset)
     // Types: 1=BYTE, 2=ASCII, 3=SHORT, 4=LONG, 5=RATIONAL
-    let mut write_entry = |tag: u16, tag_type: u16, count: u32, val_or_off: u32| -> std::io::Result<()> {
-        writer.write_all(&tag.to_le_bytes())?;
-        writer.write_all(&tag_type.to_le_bytes())?;
-        writer.write_all(&count.to_le_bytes())?;
-        writer.write_all(&val_or_off.to_le_bytes())?;
-        Ok(())
-    };
+    let mut write_entry =
+        |tag: u16, tag_type: u16, count: u32, val_or_off: u32| -> std::io::Result<()> {
+            writer.write_all(&tag.to_le_bytes())?;
+            writer.write_all(&tag_type.to_le_bytes())?;
+            writer.write_all(&count.to_le_bytes())?;
+            writer.write_all(&val_or_off.to_le_bytes())?;
+            Ok(())
+        };
 
     // TIFF 6.0 specification REQUIRES tags to be strictly sorted in ascending order:
     // Tag 256 (0x0100) ImageWidth
@@ -195,7 +205,11 @@ mod tests {
 
     fn mock_pass(rows: usize, cols: usize) -> nkscan::scan::pass::Pass {
         nkscan::scan::pass::Pass {
-            layout: nkscan::protocol::image::Layout::single_line(rows as u32, cols as u32, vec![1, 2, 3]),
+            layout: nkscan::protocol::image::Layout::single_line(
+                rows as u32,
+                cols as u32,
+                vec![1, 2, 3],
+            ),
             cooperation: Vec::new(),
             complete: true,
             blocks: 1,

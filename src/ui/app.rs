@@ -8,18 +8,18 @@
 //! - Collapsible advanced drawer for parameter inspection and manual slider adjustments.
 
 use egui::{
-    vec2, Align, Align2, Button, CentralPanel, Color32, ColorImage, CornerRadius, FontId, Layout,
-    Panel, Pos2, Rect, RichText, ScrollArea, Slider, Stroke, StrokeKind, TextureHandle,
-    TextureOptions, Ui,
+    Align, Align2, Button, CentralPanel, Color32, ColorImage, CornerRadius, FontId, Layout, Panel,
+    Pos2, Rect, RichText, ScrollArea, Slider, Stroke, StrokeKind, TextureHandle, TextureOptions,
+    Ui, vec2,
 };
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use super::review::{ReviewSession, SelectionStatus};
+use crate::processing::RollProfile;
 use crate::processing::analysis::SampleRect;
 use crate::processing::orientation::OrientationScope;
-use crate::processing::RollProfile;
 use crate::scanner::types::{FrameSelection, ScanEvent, ScanRequest, StripDiscovery};
 use crate::scanner::worker::{ScanCommand, ScannerWorkerHandle, WorkerMessage};
 
@@ -156,51 +156,48 @@ impl ReviewApp {
 
         for msg in messages {
             match msg {
-                WorkerMessage::Event(evt) => {
-                    match &evt {
-                        ScanEvent::ScannerFound { description } => {
-                            self.status_message = format!("Scanner: {description}");
-                        }
-                        ScanEvent::SessionReady => {
-                            self.status_message = "Scanner ready".into();
-                        }
-                        ScanEvent::MediaChecked { loaded } => {
-                            self.status_message = if *loaded {
-                                "Film loaded".into()
-                            } else {
-                                "No film loaded".into()
-                            };
-                        }
-                        ScanEvent::DiscoveryStarted { .. } => {
-                            self.status_message = "Discovering strip boundaries...".into();
-                        }
-                        ScanEvent::DiscoveryCompleted { detected_count } => {
-                            self.status_message = format!("Discovered {detected_count} frames on strip");
-                        }
-                        ScanEvent::FrameStarted {
-                            frame_number,
-                            total_frames,
-                            dpi,
-                            ..
-                        } => {
-                            self.status_message =
-                                format!("Scanning Frame {frame_number} of {total_frames} ({dpi} DPI)...");
-                            self.scan_progress = 0.0;
-                            self.is_scanning = true;
-                        }
-                        ScanEvent::Progress { percent, .. } => {
-                            self.scan_progress = (*percent as f32 / 100.0).clamp(0.0, 1.0);
-                        }
-                        ScanEvent::FrameCompleted {
-                            frame_number,
-                        } => {
-                            self.status_message =
-                                format!("Frame {frame_number} acquired");
-                            self.scan_progress = 1.0;
-                        }
-                        _ => {}
+                WorkerMessage::Event(evt) => match &evt {
+                    ScanEvent::ScannerFound { description } => {
+                        self.status_message = format!("Scanner: {description}");
                     }
-                }
+                    ScanEvent::SessionReady => {
+                        self.status_message = "Scanner ready".into();
+                    }
+                    ScanEvent::MediaChecked { loaded } => {
+                        self.status_message = if *loaded {
+                            "Film loaded".into()
+                        } else {
+                            "No film loaded".into()
+                        };
+                    }
+                    ScanEvent::DiscoveryStarted { .. } => {
+                        self.status_message = "Discovering strip boundaries...".into();
+                    }
+                    ScanEvent::DiscoveryCompleted { detected_count } => {
+                        self.status_message =
+                            format!("Discovered {detected_count} frames on strip");
+                    }
+                    ScanEvent::FrameStarted {
+                        frame_number,
+                        total_frames,
+                        dpi,
+                        ..
+                    } => {
+                        self.status_message = format!(
+                            "Scanning Frame {frame_number} of {total_frames} ({dpi} DPI)..."
+                        );
+                        self.scan_progress = 0.0;
+                        self.is_scanning = true;
+                    }
+                    ScanEvent::Progress { percent, .. } => {
+                        self.scan_progress = (*percent as f32 / 100.0).clamp(0.0, 1.0);
+                    }
+                    ScanEvent::FrameCompleted { frame_number } => {
+                        self.status_message = format!("Frame {frame_number} acquired");
+                        self.scan_progress = 1.0;
+                    }
+                    _ => {}
+                },
                 WorkerMessage::FrameReady(prepared) => {
                     let was_empty = self.session.frames.is_empty();
                     let _ = self.session.add_prepared_frame(*prepared);
@@ -210,8 +207,7 @@ impl ReviewApp {
                     }
                 }
                 WorkerMessage::DiscoveryReady(discovery) => {
-                    self.status_message =
-                        format!("Discovered {} frames", discovery.frames().len());
+                    self.status_message = format!("Discovered {} frames", discovery.frames().len());
                     self.scan_setup.last_discovery = Some(discovery);
                 }
                 WorkerMessage::StripScanComplete => {
@@ -280,6 +276,10 @@ impl ReviewApp {
     /// Triggers a scan using the current GUI configuration settings.
     pub fn start_scan(&mut self) {
         let req = self.build_scan_request();
+        if let Err(err) = req.validate() {
+            self.status_message = format!("Invalid scan settings: {err}");
+            return;
+        }
         if let Some(roll) = &req.roll {
             self.session.roll = roll.clone();
         }
@@ -288,6 +288,8 @@ impl ReviewApp {
             self.is_scanning = true;
             self.status_message = "Starting scan...".into();
             self.scan_setup.show_setup_modal = false;
+        } else {
+            self.status_message = "Cannot start scan: no scanner connected".into();
         }
     }
 
@@ -309,24 +311,56 @@ impl ReviewApp {
                 // Resolution
                 ui.horizontal(|ui| {
                     ui.label("Resolution:");
-                    ui.radio_value(&mut self.scan_setup.resolution_dpi, 725, "725 DPI (Preview)");
+                    ui.radio_value(
+                        &mut self.scan_setup.resolution_dpi,
+                        725,
+                        "725 DPI (Preview)",
+                    );
                     ui.radio_value(&mut self.scan_setup.resolution_dpi, 1450, "1450 DPI");
-                    ui.radio_value(&mut self.scan_setup.resolution_dpi, 2900, "2900 DPI (Native)");
+                    ui.radio_value(
+                        &mut self.scan_setup.resolution_dpi,
+                        2900,
+                        "2900 DPI (Native)",
+                    );
                 });
 
                 // Dust removal
-                ui.checkbox(&mut self.scan_setup.dust_removal, "Dust & Scratch Removal (OpenICE)");
+                ui.checkbox(
+                    &mut self.scan_setup.dust_removal,
+                    "Dust & Scratch Removal (OpenICE)",
+                );
 
                 // Quality preset
                 ui.horizontal(|ui| {
                     ui.label("Quality Preset:");
-                    if ui.radio_value(&mut self.scan_setup.quality, QualityPreset::Standard, "Standard (1x)").clicked() {
+                    if ui
+                        .radio_value(
+                            &mut self.scan_setup.quality,
+                            QualityPreset::Standard,
+                            "Standard (1x)",
+                        )
+                        .clicked()
+                    {
                         self.scan_setup.samples = 1;
                     }
-                    if ui.radio_value(&mut self.scan_setup.quality, QualityPreset::Fine, "Fine (4x)").clicked() {
+                    if ui
+                        .radio_value(
+                            &mut self.scan_setup.quality,
+                            QualityPreset::Fine,
+                            "Fine (4x)",
+                        )
+                        .clicked()
+                    {
                         self.scan_setup.samples = 4;
                     }
-                    if ui.radio_value(&mut self.scan_setup.quality, QualityPreset::Ultimate, "Ultimate (16x)").clicked() {
+                    if ui
+                        .radio_value(
+                            &mut self.scan_setup.quality,
+                            QualityPreset::Ultimate,
+                            "Ultimate (16x)",
+                        )
+                        .clicked()
+                    {
                         self.scan_setup.samples = 16;
                     }
                 });
@@ -334,7 +368,10 @@ impl ReviewApp {
                 // Output folder
                 ui.horizontal(|ui| {
                     ui.label("Output folder:");
-                    if ui.text_edit_singleline(&mut self.scan_setup.output_dir_str).changed() {
+                    if ui
+                        .text_edit_singleline(&mut self.scan_setup.output_dir_str)
+                        .changed()
+                    {
                         self.output_dir = PathBuf::from(&self.scan_setup.output_dir_str);
                     }
                 });
@@ -349,9 +386,21 @@ impl ReviewApp {
                             _ => "Kodak Pro Image 100",
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.scan_setup.film_stock_index, 0, "Kodak Pro Image 100");
-                            ui.selectable_value(&mut self.scan_setup.film_stock_index, 1, "Kodak Portra 400");
-                            ui.selectable_value(&mut self.scan_setup.film_stock_index, 2, "Kodak Gold 200");
+                            ui.selectable_value(
+                                &mut self.scan_setup.film_stock_index,
+                                0,
+                                "Kodak Pro Image 100",
+                            );
+                            ui.selectable_value(
+                                &mut self.scan_setup.film_stock_index,
+                                1,
+                                "Kodak Portra 400",
+                            );
+                            ui.selectable_value(
+                                &mut self.scan_setup.film_stock_index,
+                                2,
+                                "Kodak Gold 200",
+                            );
                         });
                 });
 
@@ -360,29 +409,52 @@ impl ReviewApp {
                     // Samples slider
                     ui.horizontal(|ui| {
                         ui.label("Multi-sample count:");
-                        if ui.add(Slider::new(&mut self.scan_setup.samples, 1..=16).text("passes")).changed() {
+                        if ui
+                            .add(Slider::new(&mut self.scan_setup.samples, 1..=16).text("passes"))
+                            .changed()
+                        {
                             self.scan_setup.quality = QualityPreset::Custom;
                         }
                     });
 
                     // Auto-crop
-                    ui.checkbox(&mut self.scan_setup.auto_crop, "Automatic edge detection & border crop");
+                    ui.checkbox(
+                        &mut self.scan_setup.auto_crop,
+                        "Automatic edge detection & border crop",
+                    );
 
-                    // Travel offset
-                    ui.horizontal(|ui| {
-                        ui.label("Scanner travel offset:");
-                        ui.add(Slider::new(&mut self.scan_setup.scanner_offset_mm, -5.0..=5.0).step_by(0.1).suffix(" mm"));
+                    // Travel offset (disabled until Phase 4 hardware offset integration)
+                    ui.add_enabled_ui(false, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Scanner travel offset (unsupported):");
+                            ui.add(
+                                Slider::new(&mut self.scan_setup.scanner_offset_mm, -5.0..=5.0)
+                                    .step_by(0.1)
+                                    .suffix(" mm"),
+                            );
+                        });
                     });
 
                     // Manual frame selection
                     ui.add_space(4.0);
                     ui.label(RichText::new("Frame Selection:").strong());
-                    ui.radio_value(&mut self.scan_setup.all_frames, true, "Scan all discovered frames on strip");
-                    ui.radio_value(&mut self.scan_setup.all_frames, false, "Manual frame selection");
+                    ui.radio_value(
+                        &mut self.scan_setup.all_frames,
+                        true,
+                        "Scan all discovered frames on strip",
+                    );
+                    ui.radio_value(
+                        &mut self.scan_setup.all_frames,
+                        false,
+                        "Manual frame selection",
+                    );
                     if !self.scan_setup.all_frames {
                         ui.horizontal(|ui| {
                             for f in 0..6 {
-                                ui.checkbox(&mut self.scan_setup.frame_selected[f], format!("#{}", f + 1));
+                                ui.checkbox(
+                                    &mut self.scan_setup.frame_selected[f],
+                                    format!("#{}", f + 1),
+                                );
                             }
                         });
                     }
@@ -409,23 +481,32 @@ impl ReviewApp {
                         ui.add_space(4.0);
                         ui.separator();
                         ui.label(RichText::new("Strip Diagnostics:").strong());
-                        ui.small(format!("Optical DPI: {} x {}", d.optical_dpi.0, d.optical_dpi.1));
-                        ui.small(format!("Discovered frames count: {}", d.detected_frames.len()));
+                        ui.small(format!(
+                            "Optical DPI: {} x {}",
+                            d.optical_dpi.0, d.optical_dpi.1
+                        ));
+                        ui.small(format!(
+                            "Discovered frames count: {}",
+                            d.detected_frames.len()
+                        ));
                         ui.small(format!("Framing method: {:?}", d.framing));
                     }
                 });
 
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    let start_btn = Button::new(
-                        RichText::new("▶ Start Scan")
-                            .color(Color32::WHITE)
-                            .strong(),
-                    )
-                    .fill(Color32::from_rgb(40, 160, 60));
+                    let start_btn =
+                        Button::new(RichText::new("▶ Start Scan").color(Color32::WHITE).strong())
+                            .fill(Color32::from_rgb(40, 160, 60));
 
-                    if ui.add(start_btn).clicked() {
+                    if ui.add_enabled(self.worker.is_some(), start_btn).clicked() {
                         self.start_scan();
+                    }
+                    if self.worker.is_none() {
+                        ui.colored_label(
+                            Color32::from_rgb(200, 160, 100),
+                            "(No scanner connected)",
+                        );
                     }
 
                     if ui.button("Close").clicked() {
@@ -449,15 +530,11 @@ impl eframe::App for ReviewApp {
         self.render_scan_setup_window(&ctx);
 
         // Handle keyboard navigation shortcuts
-        if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-            if self.session.prev_frame() {
-                self.preview_texture = None;
-            }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) && self.session.prev_frame() {
+            self.preview_texture = None;
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-            if self.session.next_frame() {
-                self.preview_texture = None;
-            }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) && self.session.next_frame() {
+            self.preview_texture = None;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::R)) {
             self.session.rotate(self.session.orientation_scope, true);
@@ -485,9 +562,16 @@ impl eframe::App for ReviewApp {
                     .current_frame()
                     .map(|f| f.frame_number)
                     .unwrap_or(0);
+                let current_idx = self.session.current_index + 1;
                 let total = self.session.frame_count();
 
-                ui.heading(format!("Frame {current_num} of {total}"));
+                if total > 1 {
+                    ui.heading(format!("Frame #{current_num} ({current_idx}/{total})"));
+                } else if total == 1 {
+                    ui.heading(format!("Frame #{current_num}"));
+                } else {
+                    ui.heading("No Frames");
+                }
 
                 if ui.add_enabled(has_next, Button::new("Next ▶")).clicked() {
                     self.session.next_frame();
@@ -512,15 +596,14 @@ impl eframe::App for ReviewApp {
                                     .color(Color32::from_rgb(255, 120, 120)),
                             )
                             .clicked()
+                            && let Some(w) = &self.worker
                         {
-                            if let Some(w) = &self.worker {
-                                w.cancel_current();
-                            }
+                            w.cancel_current();
                         }
-                        if ui.button("⏸ Stop After Frame").clicked() {
-                            if let Some(w) = &self.worker {
-                                w.stop_after_current();
-                            }
+                        if ui.button("⏸ Stop After Frame").clicked()
+                            && let Some(w) = &self.worker
+                        {
+                            w.stop_after_current();
                         }
                     } else {
                         if ui
@@ -541,11 +624,17 @@ impl eframe::App for ReviewApp {
                             }
                             self.status_message = "Discovering strip...".into();
                         }
-                        if ui.button("⏏ Eject").clicked() {
-                            if let Some(w) = &self.worker {
-                                w.eject();
-                            }
+                        if ui.button("⏏ Eject").clicked()
+                            && let Some(w) = &self.worker
+                        {
+                            w.eject();
                         }
+                    }
+                } else {
+                    ui.separator();
+                    ui.colored_label(Color32::from_rgb(200, 160, 100), "No scanner connected");
+                    if ui.button("⚙ Setup").clicked() {
+                        self.scan_setup.show_setup_modal = true;
                     }
                 }
 
@@ -573,14 +662,14 @@ impl eframe::App for ReviewApp {
                             .color(Color32::from_rgb(200, 200, 200)),
                     );
 
-                    if let Some((notification, inst)) = &self.save_notification {
-                        if inst.elapsed() < Duration::from_secs(4) {
-                            ui.separator();
-                            ui.colored_label(
-                                Color32::from_rgb(100, 255, 100),
-                                format!("✓ {notification}"),
-                            );
-                        }
+                    if let Some((notification, inst)) = &self.save_notification
+                        && inst.elapsed() < Duration::from_secs(4)
+                    {
+                        ui.separator();
+                        ui.colored_label(
+                            Color32::from_rgb(100, 255, 100),
+                            format!("✓ {notification}"),
+                        );
                     }
                 });
             }
@@ -683,9 +772,7 @@ impl eframe::App for ReviewApp {
                         ui.collapsing("Film Substrate (D-min)", |ui| {
                             ui.label(format!(
                                 "R: {:.4}  G: {:.4}  B: {:.4}",
-                                frame.params.dmin[0],
-                                frame.params.dmin[1],
-                                frame.params.dmin[2]
+                                frame.params.dmin[0], frame.params.dmin[1], frame.params.dmin[2]
                             ));
                         });
 
@@ -705,7 +792,9 @@ impl eframe::App for ReviewApp {
                         ui.horizontal(|ui| {
                             ui.label("Scan bias:");
                             if ui
-                                .add(Slider::new(&mut frame.params.offset, -0.5..=0.5).step_by(0.01))
+                                .add(
+                                    Slider::new(&mut frame.params.offset, -0.5..=0.5).step_by(0.01),
+                                )
                                 .changed()
                             {
                                 params_changed = true;
@@ -851,13 +940,17 @@ impl ReviewApp {
                         ui.add_space(12.0);
                         ui.horizontal(|ui| {
                             let scan_btn = Button::new(
-                                RichText::new("▶ Scan Strip")
-                                    .color(Color32::WHITE)
-                                    .strong(),
+                                RichText::new("▶ Scan Strip").color(Color32::WHITE).strong(),
                             )
                             .fill(Color32::from_rgb(40, 160, 60));
-                            if ui.add(scan_btn).clicked() {
+                            if ui.add_enabled(self.worker.is_some(), scan_btn).clicked() {
                                 self.start_scan();
+                            }
+                            if self.worker.is_none() {
+                                ui.colored_label(
+                                    Color32::from_rgb(200, 160, 100),
+                                    "(No scanner connected)",
+                                );
                             }
                             if ui.button("⚙ Scan Settings").clicked() {
                                 self.scan_setup.show_setup_modal = true;
@@ -887,7 +980,9 @@ impl ReviewApp {
         // Aspect-fit target rectangle
         let img_w = pw as f32;
         let img_h = ph as f32;
-        let scale = (available_size.x / img_w).min(available_size.y / img_h).min(1.0);
+        let scale = (available_size.x / img_w)
+            .min(available_size.y / img_h)
+            .min(1.0);
         let target_w = img_w * scale;
         let target_h = img_h * scale;
 
@@ -899,7 +994,11 @@ impl ReviewApp {
         let response = ui.allocate_rect(canvas_rect, egui::Sense::click_and_drag());
 
         let painter = ui.painter_at(canvas_rect);
-        painter.rect_filled(canvas_rect, CornerRadius::ZERO, Color32::from_rgb(20, 20, 22));
+        painter.rect_filled(
+            canvas_rect,
+            CornerRadius::ZERO,
+            Color32::from_rgb(20, 20, 22),
+        );
 
         painter.image(
             texture_handle.id(),
@@ -911,17 +1010,17 @@ impl ReviewApp {
         let mut committed_selection: Option<SampleRect> = None;
 
         if response.drag_started() {
-            if let Some(pos) = response.interact_pointer_pos() {
-                if image_rect.contains(pos) {
-                    self.drag_start = Some(pos);
-                    self.drag_current = Some(pos);
-                }
+            if let Some(pos) = response.interact_pointer_pos()
+                && image_rect.contains(pos)
+            {
+                self.drag_start = Some(pos);
+                self.drag_current = Some(pos);
             }
         } else if response.dragged() {
-            if self.drag_start.is_some() {
-                if let Some(pos) = response.interact_pointer_pos() {
-                    self.drag_current = Some(pos);
-                }
+            if self.drag_start.is_some()
+                && let Some(pos) = response.interact_pointer_pos()
+            {
+                self.drag_current = Some(pos);
             }
         } else if response.drag_stopped() {
             if let (Some(start), Some(curr)) = (self.drag_start, self.drag_current) {
@@ -1070,4 +1169,3 @@ pub fn run_gui(app: ReviewApp) -> eframe::Result<()> {
 pub fn run_review_gui(session: ReviewSession) -> eframe::Result<()> {
     run_gui(ReviewApp::new(session))
 }
-

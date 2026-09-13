@@ -1,4 +1,3 @@
-use std::{io::Write, path::Path};
 use coolscan_studio::{
     cli,
     frame_position::{self, FramePosition},
@@ -6,14 +5,13 @@ use coolscan_studio::{
     processing::{RollProfile, ScannerColorPipeline},
     scanner::{
         discover_strip, dots_to_mm, scan_strip_with_session,
-        types::{
-            CropFallbackReason, FrameSelection, ScanEvent, ScanPhase, ScanRequest,
-        },
+        types::{CropFallbackReason, FrameSelection, ScanEvent, ScanPhase, ScanRequest},
         worker::ScannerWorkerHandle,
     },
-    ui::{run_gui, ReviewApp, ReviewSession},
+    ui::{ReviewApp, ReviewSession, run_gui},
 };
 use nkscan::{device, session::Session};
+use std::{io::Write, path::Path};
 
 fn main() {
     let options = match cli::parse(std::env::args().skip(1)) {
@@ -39,9 +37,8 @@ fn main() {
         return;
     }
 
-    let launch_gui = options.gui
-        || options.mock
-        || (!options.scan && !options.eject && options.frame.is_none());
+    let launch_gui =
+        options.gui || options.mock || (!options.scan && !options.eject && options.frame.is_none());
 
     if launch_gui {
         let roll = match options.roll.as_deref() {
@@ -58,17 +55,23 @@ fn main() {
             None => RollProfile::pro_image_100(),
         };
 
-        let worker = if options.mock {
+        let (worker, initial_status) = if options.mock {
             println!("Coolscan Studio — Launching GUI in Mock Mode");
-            ScannerWorkerHandle::spawn_mock(6)
+            (
+                Some(ScannerWorkerHandle::spawn_mock(6)),
+                "Mock Scanner (6 frames)",
+            )
         } else {
             let scanners = device::list();
             if scanners.is_empty() {
-                println!("No Nikon Coolscan scanners found. Launching GUI in Mock Mode.");
-                ScannerWorkerHandle::spawn_mock(6)
+                println!("No Nikon Coolscan scanners found. Disconnected mode.");
+                (None, "No scanner connected")
             } else {
                 println!("Found scanner: {}", scanners[0]);
-                ScannerWorkerHandle::spawn_hardware(roll.clone())
+                (
+                    Some(ScannerWorkerHandle::spawn_hardware(roll.clone())),
+                    "Ready",
+                )
             }
         };
 
@@ -82,9 +85,11 @@ fn main() {
 
         let session = ReviewSession::empty(roll, pipeline);
         let out_dir = options.output.as_deref().unwrap_or("./scans");
-        let app = ReviewApp::new(session)
-            .with_worker(worker)
-            .with_output_dir(out_dir);
+        let mut app = ReviewApp::new(session).with_output_dir(out_dir);
+        app.status_message = initial_status.into();
+        if let Some(w) = worker {
+            app = app.with_worker(w);
+        }
 
         if let Err(e) = run_gui(app) {
             eprintln!("GUI application error: {e}");
@@ -167,10 +172,15 @@ fn main() {
 
     if options.scan {
         let out_dir = options.output.as_deref().unwrap_or(".");
-        let scan_dpi = options.dpi.unwrap_or(if options.high_fidelity { 2900 } else { 725 });
+        let scan_dpi = options
+            .dpi
+            .unwrap_or(if options.high_fidelity { 2900 } else { 725 });
         let do_clean = options.clean || options.high_fidelity;
         let do_tiff = options.tiff || options.high_fidelity;
-        let requested_samples = options.samples.unwrap_or(if options.high_fidelity { 16 } else { 1 });
+        let requested_samples =
+            options
+                .samples
+                .unwrap_or(if options.high_fidelity { 16 } else { 1 });
 
         let frames = match options.frame {
             Some(f) => FrameSelection::Specific(f),
@@ -205,26 +215,30 @@ fn main() {
                 );
                 Some(p)
             }
-            Some(path) => {
-                match RollProfile::load_from_file(Path::new(path)) {
-                    Ok(p) => {
-                        println!("Roll profile: {} ({})", p.name, p.film_stock);
-                        println!(
-                            "  D-min: R={:.4}, G={:.4}, B={:.4}",
-                            p.dmin[0], p.dmin[1], p.dmin[2]
-                        );
-                        Some(p)
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to load roll profile from {path}: {e}");
-                        std::process::exit(2);
-                    }
+            Some(path) => match RollProfile::load_from_file(Path::new(path)) {
+                Ok(p) => {
+                    println!("Roll profile: {} ({})", p.name, p.film_stock);
+                    println!(
+                        "  D-min: R={:.4}, G={:.4}, B={:.4}",
+                        p.dmin[0], p.dmin[1], p.dmin[2]
+                    );
+                    Some(p)
                 }
-            }
+                Err(e) => {
+                    eprintln!("Failed to load roll profile from {path}: {e}");
+                    std::process::exit(2);
+                }
+            },
             None => None,
         };
 
-        let mut request = ScanRequest::new(frames, scan_dpi, requested_samples, do_clean, options.auto_crop);
+        let mut request = ScanRequest::new(
+            frames,
+            scan_dpi,
+            requested_samples,
+            do_clean,
+            options.auto_crop,
+        );
         if let Some(p) = roll_profile {
             request = request.with_roll(p);
         }
@@ -267,13 +281,13 @@ fn main() {
                 max_attempts,
             } => {
                 if attempt > 1 {
-                    println!("  [USB] Retrying Frame {frame_number} (attempt {attempt} of {max_attempts})...");
+                    println!(
+                        "  [USB] Retrying Frame {frame_number} (attempt {attempt} of {max_attempts})..."
+                    );
                 }
             }
             ScanEvent::FramePassStarted {
-                pass,
-                total_passes,
-                ..
+                pass, total_passes, ..
             } => {
                 if total_passes > 1 {
                     println!("  Pass {pass} of {total_passes}:");
@@ -350,26 +364,24 @@ fn main() {
             ScanEvent::UsbRefreshFailed { error, .. } => {
                 eprintln!("  [USB] Failed to reconnect: {error}");
             }
-            ScanEvent::FrameSkipped { frame_number, reason } => {
+            ScanEvent::FrameSkipped {
+                frame_number,
+                reason,
+            } => {
                 eprintln!("Skipping frame {frame_number} due to: {reason}");
             }
             ScanEvent::FrameCompleted { .. } => {}
             _ => {}
         };
 
-        let scan_result = match scan_strip_with_session(
-            &scanner,
-            session,
-            &request,
-            Some(discovery),
-            progress,
-        ) {
-            Ok(res) => res,
-            Err(e) => {
-                eprintln!("Scan error: {e}");
-                std::process::exit(2);
-            }
-        };
+        let scan_result =
+            match scan_strip_with_session(&scanner, session, &request, Some(discovery), progress) {
+                Ok(res) => res,
+                Err(e) => {
+                    eprintln!("Scan error: {e}");
+                    std::process::exit(2);
+                }
+            };
 
         for artifact in &scan_result.frames {
             match output::save_frame_outputs(artifact, &output_policy) {
@@ -380,7 +392,10 @@ fn main() {
                             (output::FileFormat::Bmp, output::SavedCropStatus::Cropped) => {
                                 println!("  Saved {path_str}");
                             }
-                            (output::FileFormat::Bmp, output::SavedCropStatus::AmbiguousFallback) => {
+                            (
+                                output::FileFormat::Bmp,
+                                output::SavedCropStatus::AmbiguousFallback,
+                            ) => {
                                 println!("  Saved {path_str} (uncropped fallback)");
                             }
                             (output::FileFormat::Bmp, output::SavedCropStatus::Uncropped) => {
@@ -389,7 +404,10 @@ fn main() {
                             (output::FileFormat::Tiff, output::SavedCropStatus::Cropped) => {
                                 println!("  Saved {path_str} (16-bit linear master)");
                             }
-                            (output::FileFormat::Tiff, output::SavedCropStatus::AmbiguousFallback) => {
+                            (
+                                output::FileFormat::Tiff,
+                                output::SavedCropStatus::AmbiguousFallback,
+                            ) => {
                                 println!("  Saved {path_str} (16-bit master fallback)");
                             }
                             (output::FileFormat::Tiff, output::SavedCropStatus::Uncropped) => {
@@ -399,7 +417,10 @@ fn main() {
                     }
                 }
                 Err(e) => {
-                    eprintln!("  Failed to write outputs for frame {}: {e}", artifact.frame_number);
+                    eprintln!(
+                        "  Failed to write outputs for frame {}: {e}",
+                        artifact.frame_number
+                    );
                 }
             }
         }
@@ -418,19 +439,15 @@ fn main() {
         let capabilities = session.capabilities();
         let x = &capabilities.address.x_axis;
         let y = &capabilities.address.y_axis;
-        let Some(right) = frame_position::axis_end(
-            x.address_range.start,
-            x.address_range.last,
-            x.boundary,
-        ) else {
+        let Some(right) =
+            frame_position::axis_end(x.address_range.start, x.address_range.last, x.boundary)
+        else {
             eprintln!("Invalid scanner X limits.");
             std::process::exit(2);
         };
-        let Some(bottom) = frame_position::axis_end(
-            y.address_range.start,
-            y.address_range.last,
-            y.boundary,
-        ) else {
+        let Some(bottom) =
+            frame_position::axis_end(y.address_range.start, y.address_range.last, y.boundary)
+        else {
             eprintln!("Invalid scanner Y limits.");
             std::process::exit(2);
         };
@@ -507,7 +524,11 @@ fn main() {
         discovery.thumbnail.as_ref(),
         discovery.thumbnail_samples.as_ref(),
     ) {
-        match output::save_discovery_thumbnail(thumbnail, thumbnail_samples, Path::new("discovery-strip.bmp")) {
+        match output::save_discovery_thumbnail(
+            thumbnail,
+            thumbnail_samples,
+            Path::new("discovery-strip.bmp"),
+        ) {
             Ok(()) => println!(
                 "Saved discovery-strip.bmp ({} x {} pixels).",
                 thumbnail.cols, thumbnail.rows

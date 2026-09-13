@@ -25,7 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(dir);
     let raw_path = if root.join(format!("frame-{frame_num}.raw")).exists() {
         root.join(format!("frame-{frame_num}.raw"))
-    } else if root.join(format!("frame-{frame_num}-uncropped.raw")).exists() {
+    } else if root
+        .join(format!("frame-{frame_num}-uncropped.raw"))
+        .exists()
+    {
         root.join(format!("frame-{frame_num}-uncropped.raw"))
     } else {
         return Err(format!("Missing raw file in {dir} for frame {frame_num}").into());

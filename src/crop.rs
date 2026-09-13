@@ -839,8 +839,7 @@ mod tests {
             ..Default::default()
         };
         let decision =
-            CropDecision::from_preview_samples(&samples, &pass, 4400, 4.0, &raw_options)
-                .unwrap();
+            CropDecision::from_preview_samples(&samples, &pass, 4400, 4.0, &raw_options).unwrap();
 
         assert!(decision.accepted);
         assert_eq!(decision.columns, (20, 180));
@@ -897,7 +896,11 @@ mod tests {
         let cols = 100;
         let mut plane = Vec::with_capacity(rows * cols);
         for row in 0..rows {
-            let val = if (10..90).contains(&row) { 25000u16 } else { 50u16 };
+            let val = if (10..90).contains(&row) {
+                25000u16
+            } else {
+                50u16
+            };
             for _ in 0..cols {
                 plane.push(val);
             }

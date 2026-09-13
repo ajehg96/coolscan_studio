@@ -6,9 +6,7 @@ use coolscan_studio::processing::analysis::SampleRect;
 use coolscan_studio::processing::color::ScannerColorPipeline;
 use coolscan_studio::processing::orientation::{Orientation, OrientationScope};
 use coolscan_studio::processing::roll::RollProfile;
-use coolscan_studio::scanner::{
-    FrameSelection, ScanCommand, ScanRequest, ScannerWorkerHandle,
-};
+use coolscan_studio::scanner::{FrameSelection, ScanCommand, ScanRequest, ScannerWorkerHandle};
 use coolscan_studio::ui::{ReviewApp, ReviewSession, SelectionStatus};
 
 #[test]
@@ -17,7 +15,8 @@ fn phase11_end_to_end_mock_canned_strip_review_and_darktable_export() {
     let output_dir = std::env::temp_dir().join(format!("coolscan_studio_phase11_{test_run_id}"));
     std::fs::create_dir_all(&output_dir).expect("Failed to create temporary test directory");
 
-    let pipeline = ScannerColorPipeline::default_ls40().expect("Failed to create LS40 color pipeline");
+    let pipeline =
+        ScannerColorPipeline::default_ls40().expect("Failed to create LS40 color pipeline");
     let roll = RollProfile::pro_image_100();
 
     // 1. Initialize ReviewApp with an empty session and a 6-frame mock scanner worker
@@ -32,7 +31,10 @@ fn phase11_end_to_end_mock_canned_strip_review_and_darktable_export() {
 
     // 2. Start the scan for all 6 frames
     let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
-    app.worker.as_ref().unwrap().send(ScanCommand::StartScan(req));
+    app.worker
+        .as_ref()
+        .unwrap()
+        .send(ScanCommand::StartScan(req));
 
     // 3. Simulate UI event loop polling until all 6 frames are acquired and scan completes
     let start = Instant::now();
@@ -71,7 +73,10 @@ fn phase11_end_to_end_mock_canned_strip_review_and_darktable_export() {
 
         // Test highlight white balance selection rectangle
         let sample = SampleRect::new(4, 4, 8, 8);
-        app.session.current_frame_mut().unwrap().apply_highlight_wb_selection(sample);
+        app.session
+            .current_frame_mut()
+            .unwrap()
+            .apply_highlight_wb_selection(sample);
         assert_eq!(
             app.session.current_frame().unwrap().selection_status,
             SelectionStatus::Valid
@@ -106,7 +111,10 @@ fn phase11_end_to_end_mock_canned_strip_review_and_darktable_export() {
     }
 
     // All frames accepted
-    assert!(app.session.is_all_accepted(), "All 6 frames should be marked accepted");
+    assert!(
+        app.session.is_all_accepted(),
+        "All 6 frames should be marked accepted"
+    );
 
     // 6. Verify and validate generated Darktable XMP sidecars
     for frame_num in 1..=6 {
@@ -145,9 +153,18 @@ fn phase11_end_to_end_mock_canned_strip_review_and_darktable_export() {
         let dt_config_dir = output_dir.join("dt_config");
         std::fs::create_dir_all(&dt_config_dir).unwrap();
 
-        let tif_input = output_dir.join("frame-1.tif").to_string_lossy().replace('\\', "/");
-        let xmp_input = output_dir.join("frame-1.tif.xmp").to_string_lossy().replace('\\', "/");
-        let jpg_output = output_dir.join("frame-1.jpg").to_string_lossy().replace('\\', "/");
+        let tif_input = output_dir
+            .join("frame-1.tif")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let xmp_input = output_dir
+            .join("frame-1.tif.xmp")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let jpg_output = output_dir
+            .join("frame-1.jpg")
+            .to_string_lossy()
+            .replace('\\', "/");
         let cfg_dir = dt_config_dir.to_string_lossy().replace('\\', "/");
 
         let status = Command::new(dt_cli_path)
@@ -163,16 +180,19 @@ fn phase11_end_to_end_mock_canned_strip_review_and_darktable_export() {
             ])
             .status();
 
-        if let Ok(exit_status) = status {
-            if exit_status.success() {
-                let rendered_jpg = output_dir.join("frame-1.jpg");
-                assert!(
-                    rendered_jpg.is_file(),
-                    "Darktable CLI should have successfully rendered frame-1.jpg"
-                );
-                let metadata = std::fs::metadata(&rendered_jpg).unwrap();
-                assert!(metadata.len() > 100, "Rendered JPEG must contain image bytes");
-            }
+        if let Ok(exit_status) = status
+            && exit_status.success()
+        {
+            let rendered_jpg = output_dir.join("frame-1.jpg");
+            assert!(
+                rendered_jpg.is_file(),
+                "Darktable CLI should have successfully rendered frame-1.jpg"
+            );
+            let metadata = std::fs::metadata(&rendered_jpg).unwrap();
+            assert!(
+                metadata.len() > 100,
+                "Rendered JPEG must contain image bytes"
+            );
         }
     }
 
