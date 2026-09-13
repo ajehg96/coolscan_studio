@@ -52,7 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Opening {scanner}");
     let mut session = Session::open(scanner.open()?)?;
     if !session.media_loaded()? {
-        return Err("No film loaded in scanner. Please feed the film strip into the adapter.".into());
+        return Err(
+            "No film loaded in scanner. Please feed the film strip into the adapter.".into(),
+        );
     }
     fs::create_dir(dir)?;
 
@@ -252,12 +254,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // If accepted, crop the image and write cropped BMP
     if decision.accepted {
-        let (cropped_samples, cropped_pass) = bmp::crop_samples(
-            &samples,
-            &scanned.pass,
-            decision.rows,
-            decision.columns,
-        )?;
+        let (cropped_samples, cropped_pass) =
+            bmp::crop_samples(&samples, &scanned.pass, decision.rows, decision.columns)?;
         let stem_cropped = format!("{dir}/frame-{target_frame}-cropped");
         save_raw(&format!("{stem_cropped}.raw"), &cropped_samples)?;
         bmp::write_bmp(

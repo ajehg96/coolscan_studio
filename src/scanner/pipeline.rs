@@ -1,4 +1,3 @@
-use std::thread::sleep;
 use nkscan::{
     device::Device,
     protocol::{
@@ -6,22 +5,19 @@ use nkscan::{
         data::{BoundaryType2, Rect},
         decode::Samples,
     },
-    scan::{
-        boundaries::Polarity,
-        clean, frame, framing,
-        window::Recipe,
-    },
+    scan::{boundaries::Polarity, clean, frame, framing, window::Recipe},
     session::Session,
 };
+use std::thread::sleep;
 
 use crate::{
     boundaries,
     crop::{CropDecision, CropOptions},
     scanner::{
-        recovery::{refresh_session, INTER_FRAME_DELAY, MAX_SCAN_ATTEMPTS, RETRY_DELAY},
+        recovery::{INTER_FRAME_DELAY, MAX_SCAN_ATTEMPTS, RETRY_DELAY, refresh_session},
         types::{
-            CropFallbackReason, FrameArtifact, ScanError, ScanEvent, ScanMetadata,
-            ScanPhase, ScanRequest, StripDiscovery, StripScanResult,
+            CropFallbackReason, FrameArtifact, ScanError, ScanEvent, ScanMetadata, ScanPhase,
+            ScanRequest, StripDiscovery, StripScanResult,
         },
     },
 };
@@ -44,14 +40,18 @@ pub fn setup_overscan_frames(
     x_start: u32,
     x_width: u32,
 ) -> Option<BoundaryType2> {
-    if !matches!(discovery.table, nkscan::protocol::data::FrameTable::BoundaryType2(_)) {
+    if !matches!(
+        discovery.table,
+        nkscan::protocol::data::FrameTable::BoundaryType2(_)
+    ) {
         return None;
     }
     let pass = discovery.thumbnail.as_ref()?;
     let image = nkscan::protocol::decode::Image::new(&pass.layout, samples).ok()?;
     let pitch = pass.layout.line_pitch;
     let nominal = (36.0 * f64::from(y_dpi) / 25.4) as u32 / pitch;
-    let found = boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
+    let found =
+        boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
 
     let raw_len = u32::try_from(found.length).ok()?;
     let raw_len_dots = raw_len.checked_mul(pitch)?;
@@ -136,7 +136,8 @@ pub fn configure_overscan(
 
     let pitch = thumbnail.layout.line_pitch;
     let nominal = (36.0 * f64::from(y_dpi) / 25.4) as u32 / pitch;
-    let found = boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
+    let found =
+        boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
 
     let raw_len = u32::try_from(found.length).ok()?;
     let raw_len_dots = raw_len.checked_mul(pitch)?;
@@ -170,6 +171,44 @@ pub fn configure_overscan(
     progress(ScanEvent::OverscanConfigured { frame_count });
 
     Some(table)
+}
+
+/// Scoped exposure state for a single frame scan attempt.
+///
+/// Ensures exposure state is strictly local to an attempt and does not
+/// persist or leak into subsequent USB retry attempts.
+#[derive(Default)]
+pub struct AttemptExposureState {
+    pub(crate) first_scanned: Option<frame::Scanned>,
+}
+
+impl AttemptExposureState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn exposures(&self) -> Option<&nkscan::scan::autoexpose::Exposures> {
+        self.first_scanned.as_ref().map(|s| &s.exposures)
+    }
+
+    pub fn record_pass(&mut self, scanned: frame::Scanned) {
+        if self.first_scanned.is_none() {
+            self.first_scanned = Some(scanned);
+        }
+    }
+
+    pub fn into_exposures(self) -> Option<nkscan::scan::autoexpose::Exposures> {
+        self.first_scanned.map(|s| s.exposures)
+    }
+}
+
+/// Validates that acquired artifacts are non-empty.
+pub fn check_acquired_artifacts(acquired: &[FrameArtifact]) -> Result<(), ScanError> {
+    if acquired.is_empty() {
+        Err(ScanError::AllFramesFailed)
+    } else {
+        Ok(())
+    }
 }
 
 /// Executes a complete strip scan using an already established scanner session.
@@ -249,7 +288,9 @@ pub fn scan_strip_with_session(
     let mut acquired_artifacts = Vec::new();
 
     for (seq_idx, &frame_num) in frames_to_scan.iter().enumerate() {
-        let frame_idx = frame_num.checked_sub(1).ok_or(ScanError::FrameUnavailable(frame_num))?;
+        let frame_idx = frame_num
+            .checked_sub(1)
+            .ok_or(ScanError::FrameUnavailable(frame_num))?;
         let Some(&rect) = strip_discovery.frames().get(frame_idx) else {
             progress(ScanEvent::FrameSkipped {
                 frame_number: frame_num,
@@ -268,7 +309,7 @@ pub fn scan_strip_with_session(
 
         let mut final_samples = None;
         let mut final_pass = None;
-        let mut first_scanned: Option<frame::Scanned> = None;
+        let mut final_exposures = None;
 
         for attempt in 1..=MAX_SCAN_ATTEMPTS {
             progress(ScanEvent::FrameAttemptStarted {
@@ -281,6 +322,7 @@ pub fn scan_strip_with_session(
             let mut accum_ir: Option<Vec<u64>> = None;
             let mut current_final_pass = None;
             let mut pass_succeeded = true;
+            let mut attempt_exposure = AttemptExposureState::new();
 
             for pass_idx in 1..=software_passes {
                 progress(ScanEvent::FramePassStarted {
@@ -293,7 +335,7 @@ pub fn scan_strip_with_session(
                 let mut current_phase = None;
                 let mut last_pct = None;
                 let scan_opts = frame::Options {
-                    exposures: first_scanned.as_ref().map(|s: &frame::Scanned| &s.exposures),
+                    exposures: attempt_exposure.exposures(),
                     lock_white_balance: false,
                     clean: false,
                 };
@@ -377,9 +419,7 @@ pub fn scan_strip_with_session(
                 }
 
                 current_final_pass = Some(scanned.pass.clone());
-                if first_scanned.is_none() {
-                    first_scanned = Some(scanned);
-                }
+                attempt_exposure.record_pass(scanned);
             }
 
             if pass_succeeded && current_final_pass.is_some() {
@@ -402,6 +442,7 @@ pub fn scan_strip_with_session(
                     }),
                 });
                 final_pass = current_final_pass;
+                final_exposures = attempt_exposure.into_exposures();
                 break;
             }
 
@@ -514,7 +555,7 @@ pub fn scan_strip_with_session(
                 .as_ref()
                 .and_then(|s| s.capabilities().identity.model().map(|m| format!("{m:?}"))),
             focus_position: None,
-            exposures: first_scanned.as_ref().map(|s| s.exposures.clone()),
+            exposures: final_exposures,
             hardware_samples,
             software_passes,
             infrared_cleaned_pixels: cleaned_pixels_count,
@@ -579,6 +620,8 @@ pub fn scan_strip_with_session(
         }
     }
 
+    check_acquired_artifacts(&acquired_artifacts)?;
+
     Ok(StripScanResult {
         frames: acquired_artifacts,
         discovery: strip_discovery,
@@ -595,4 +638,105 @@ pub fn scan_strip(
     let transport = scanner.open().map_err(ScanError::DeviceOpen)?;
     let session = Session::open(transport).map_err(ScanError::SessionStart)?;
     scan_strip_with_session(scanner, session, request, None, progress)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::types::FrameSelection;
+
+    fn dummy_scanned(red_exposure: u32) -> frame::Scanned {
+        let mut exp = nkscan::scan::autoexpose::Exposures::default();
+        exp.set(nkscan::protocol::window::Channel::Red, red_exposure);
+        frame::Scanned {
+            pass: nkscan::scan::pass::Pass {
+                layout: nkscan::protocol::image::Layout::single_line(100, 100, vec![1, 2, 3]),
+                cooperation: Vec::new(),
+                complete: true,
+                blocks: 1,
+                rows: 100,
+                cols: 100,
+            },
+            exposures: exp,
+            cleaned: None,
+        }
+    }
+
+    #[test]
+    fn test_retry_exposure_state_resets_between_attempts() {
+        // Attempt 1 starts fresh with no cached exposures
+        let mut attempt1 = AttemptExposureState::new();
+        assert!(attempt1.exposures().is_none());
+
+        // Attempt 1, Pass 1 meters and records exposure
+        attempt1.record_pass(dummy_scanned(1200));
+        assert_eq!(
+            attempt1
+                .exposures()
+                .unwrap()
+                .get(nkscan::protocol::window::Channel::Red),
+            Some(1200)
+        );
+
+        // Attempt 1, subsequent pass preserves locked exposure
+        assert_eq!(
+            attempt1
+                .exposures()
+                .unwrap()
+                .get(nkscan::protocol::window::Channel::Red),
+            Some(1200)
+        );
+
+        // Attempt 1 fails (e.g. USB transport reset).
+        // Attempt 2 starts fresh: must NOT leak attempt 1's exposure state!
+        let mut attempt2 = AttemptExposureState::new();
+        assert!(
+            attempt2.exposures().is_none(),
+            "Retry attempt must start with fresh exposure state"
+        );
+
+        // Attempt 2, Pass 1 meters fresh exposure (e.g. 1800)
+        attempt2.record_pass(dummy_scanned(1800));
+        assert_eq!(
+            attempt2
+                .exposures()
+                .unwrap()
+                .get(nkscan::protocol::window::Channel::Red),
+            Some(1800)
+        );
+
+        let final_exp = attempt2.into_exposures().unwrap();
+        assert_eq!(
+            final_exp.get(nkscan::protocol::window::Channel::Red),
+            Some(1800)
+        );
+    }
+
+    #[test]
+    fn test_zero_acquired_artifacts_returns_all_frames_failed() {
+        assert!(matches!(
+            check_acquired_artifacts(&[]),
+            Err(ScanError::AllFramesFailed)
+        ));
+    }
+
+    #[test]
+    fn test_zero_discovered_frames_resolves_to_empty_and_fails() {
+        let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, false);
+        let frames_to_scan = req.frames.resolve(0);
+        assert!(frames_to_scan.is_empty());
+        // An empty acquisition list resulting from 0 discovered frames produces AllFramesFailed
+        let acquired: Vec<FrameArtifact> = Vec::new();
+        assert!(matches!(
+            check_acquired_artifacts(&acquired),
+            Err(ScanError::AllFramesFailed)
+        ));
+    }
+
+    #[test]
+    fn test_discovered_frames_resolves_all() {
+        let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, false);
+        let frames_to_scan = req.frames.resolve(6);
+        assert_eq!(frames_to_scan, vec![1, 2, 3, 4, 5, 6]);
+    }
 }

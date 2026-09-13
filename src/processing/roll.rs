@@ -1,15 +1,14 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use super::analysis::{
-    analyse_pre_white_balance, finish_after_white_balance, SampleRect, TechnicalAnalysis,
-    WorkingImage,
+    SampleRect, TechnicalAnalysis, WorkingImage, analyse_pre_white_balance,
+    finish_after_white_balance,
 };
 use super::color::{ColorError, ColorTransform};
 use super::negadoctor::NegadoctorParams;
 use super::orientation::Orientation;
 use crate::scanner::types::FrameArtifact;
-
 
 /// Current schema version for roll profiles.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -50,10 +49,10 @@ impl ScannerProfile {
 
     /// Returns the ICC profile filename for Darktable sidecar generation.
     pub fn icc_profile_name(&self) -> &str {
-        if let Some(path) = &self.icc_path {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                return name;
-            }
+        if let Some(path) = &self.icc_path
+            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+        {
+            return name;
         }
         "NKLS4000LS40_N.icc"
     }
@@ -98,10 +97,7 @@ impl std::fmt::Display for RollProfileError {
                 value,
                 reason,
             } => {
-                write!(
-                    f,
-                    "Invalid D-min for channel {channel} ({value}): {reason}"
-                )
+                write!(f, "Invalid D-min for channel {channel} ({value}): {reason}")
             }
             RollProfileError::InvalidId(msg) => write!(f, "Invalid Roll ID: {msg}"),
             RollProfileError::UnsupportedVersion { found, current } => {
@@ -381,7 +377,10 @@ mod tests {
             ScannerProfile::ls40_negative(),
         )
         .unwrap_err();
-        assert!(matches!(err, RollProfileError::InvalidDmin { channel: "Red", .. }));
+        assert!(matches!(
+            err,
+            RollProfileError::InvalidDmin { channel: "Red", .. }
+        ));
 
         // Zero channel
         let err = RollProfile::new(
@@ -392,7 +391,13 @@ mod tests {
             ScannerProfile::ls40_negative(),
         )
         .unwrap_err();
-        assert!(matches!(err, RollProfileError::InvalidDmin { channel: "Green", .. }));
+        assert!(matches!(
+            err,
+            RollProfileError::InvalidDmin {
+                channel: "Green",
+                ..
+            }
+        ));
 
         // NaN channel
         let err = RollProfile::new(
@@ -403,7 +408,13 @@ mod tests {
             ScannerProfile::ls40_negative(),
         )
         .unwrap_err();
-        assert!(matches!(err, RollProfileError::InvalidDmin { channel: "Blue", .. }));
+        assert!(matches!(
+            err,
+            RollProfileError::InvalidDmin {
+                channel: "Blue",
+                ..
+            }
+        ));
 
         // Value too high
         let err = RollProfile::new(
@@ -414,7 +425,10 @@ mod tests {
             ScannerProfile::ls40_negative(),
         )
         .unwrap_err();
-        assert!(matches!(err, RollProfileError::InvalidDmin { channel: "Red", .. }));
+        assert!(matches!(
+            err,
+            RollProfileError::InvalidDmin { channel: "Red", .. }
+        ));
     }
 
     #[test]

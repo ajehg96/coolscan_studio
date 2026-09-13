@@ -1,7 +1,4 @@
-use coolscan_studio::{
-    cli,
-    diagnostics::SystemDiagnostics,
-};
+use coolscan_studio::{cli, diagnostics::SystemDiagnostics};
 use std::path::Path;
 
 #[test]
@@ -38,7 +35,10 @@ fn phase14_system_diagnostics_and_darktable_detection() {
 #[test]
 fn phase14_packaging_notices_and_zadig_driver_guide() {
     let notices_path = Path::new("NOTICES.md");
-    assert!(notices_path.is_file(), "NOTICES.md must exist in root repository");
+    assert!(
+        notices_path.is_file(),
+        "NOTICES.md must exist in root repository"
+    );
 
     let content = std::fs::read_to_string(notices_path).expect("Failed to read NOTICES.md");
     assert!(content.contains("WinUSB Driver Configuration"));

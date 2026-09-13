@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::color::{ColorError, ColorTransform};
 use super::negadoctor::{
-    auto_dmax, auto_highlight_wb, auto_paper_black, auto_print_exposure, auto_scan_bias,
-    auto_shadow_wb, NegadoctorParams,
+    NegadoctorParams, auto_dmax, auto_highlight_wb, auto_paper_black, auto_print_exposure,
+    auto_scan_bias, auto_shadow_wb,
 };
 use super::roll::RollProfile;
 use nkscan::{protocol::decode::Samples, scan::pass::Pass};
@@ -173,8 +173,8 @@ impl WorkingImage {
         }
 
         let scale = ((max_dim as f64 / max_dimension as f64).ceil() as usize).max(1);
-        let new_w = (self.width + scale - 1) / scale;
-        let new_h = (self.height + scale - 1) / scale;
+        let new_w = self.width.div_ceil(scale);
+        let new_h = self.height.div_ceil(scale);
         let mut downscaled_pixels = Vec::with_capacity(new_w * new_h);
 
         for by in 0..new_h {
@@ -226,10 +226,7 @@ pub struct TechnicalAnalysis {
 
 /// Stage 1 analysis: Computes whole-frame technical parameters (D-max and scan exposure bias)
 /// from the cropped image area and roll substrate profile.
-pub fn analyse_pre_white_balance(
-    image: &WorkingImage,
-    roll: &RollProfile,
-) -> TechnicalAnalysis {
+pub fn analyse_pre_white_balance(image: &WorkingImage, roll: &RollProfile) -> TechnicalAnalysis {
     let stats = image.sample_region(None);
     let dmax = auto_dmax(roll.dmin, stats.min);
     let scan_bias = auto_scan_bias(roll.dmin, dmax, stats.max);
@@ -264,10 +261,7 @@ pub fn sample_shadow_wb(
 
 /// Stage 2 analysis: Completes parameter calculation after white balance has been established,
 /// computing paper black and print exposure adjustment over the full cropped image.
-pub fn finish_after_white_balance(
-    image: &WorkingImage,
-    params: &mut NegadoctorParams,
-) {
+pub fn finish_after_white_balance(image: &WorkingImage, params: &mut NegadoctorParams) {
     let stats = image.sample_region(None);
     params.paper_black = auto_paper_black(
         params.dmin,

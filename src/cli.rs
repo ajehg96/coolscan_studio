@@ -209,8 +209,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_words("--scan --high-fidelity")
-                .unwrap(),
+            parse_words("--scan --high-fidelity").unwrap(),
             Some(Options {
                 scan: true,
                 high_fidelity: true,
@@ -218,8 +217,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_words("--scan --no-auto-crop")
-                .unwrap(),
+            parse_words("--scan --no-auto-crop").unwrap(),
             Some(Options {
                 scan: true,
                 auto_crop: false,

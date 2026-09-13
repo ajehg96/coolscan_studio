@@ -1,20 +1,15 @@
 use coolscan_studio::{
     cli::{self, Options},
     processing::{RollProfile, ScannerColorPipeline},
-    scanner::{
-        types::FrameSelection,
-        worker::ScannerWorkerHandle,
-    },
-    ui::{
-        app::QualityPreset,
-        ReviewApp, ReviewSession,
-    },
+    scanner::{types::FrameSelection, worker::ScannerWorkerHandle},
+    ui::{ReviewApp, ReviewSession, app::QualityPreset},
 };
 use std::path::PathBuf;
 
 #[test]
 fn phase12_gui_setup_and_custom_scan_request_builder() {
-    let pipeline = ScannerColorPipeline::default_ls40().expect("Failed to initialize color pipeline");
+    let pipeline =
+        ScannerColorPipeline::default_ls40().expect("Failed to initialize color pipeline");
     let roll = RollProfile::pro_image_100();
     let session = ReviewSession::empty(roll, pipeline);
     let mut app = ReviewApp::new(session);
@@ -36,7 +31,10 @@ fn phase12_gui_setup_and_custom_scan_request_builder() {
     assert!(default_req.auto_crop);
     assert_eq!(default_req.frames, FrameSelection::All);
     assert_eq!(default_req.offset_mm, 0.0);
-    assert_eq!(default_req.roll.as_ref().unwrap().film_stock, "Kodak Pro Image 100");
+    assert_eq!(
+        default_req.roll.as_ref().unwrap().film_stock,
+        "Kodak Pro Image 100"
+    );
 
     // 2. Configure Quality Preset: Fine (4x multi-sample)
     app.scan_setup.quality = QualityPreset::Fine;
@@ -51,7 +49,10 @@ fn phase12_gui_setup_and_custom_scan_request_builder() {
     // 4. Configure Film Profile: Kodak Portra 400
     app.scan_setup.film_stock_index = 1;
     let portra_req = app.build_scan_request();
-    assert_eq!(portra_req.roll.as_ref().unwrap().film_stock, "Kodak Portra 400");
+    assert_eq!(
+        portra_req.roll.as_ref().unwrap().film_stock,
+        "Kodak Portra 400"
+    );
     assert_eq!(portra_req.roll.as_ref().unwrap().id.0, "kodak-portra-400");
 
     // 5. Configure Film Profile: Kodak Gold 200
@@ -81,7 +82,8 @@ fn phase12_gui_setup_and_custom_scan_request_builder() {
 
 #[test]
 fn phase12_start_scan_syncs_session_roll_and_dispatches_to_worker() {
-    let pipeline = ScannerColorPipeline::default_ls40().expect("Failed to initialize color pipeline");
+    let pipeline =
+        ScannerColorPipeline::default_ls40().expect("Failed to initialize color pipeline");
     let initial_roll = RollProfile::pro_image_100();
     let session = ReviewSession::empty(initial_roll, pipeline);
     let worker = ScannerWorkerHandle::spawn_mock(6);
@@ -120,15 +122,23 @@ fn phase12_all_cli_scan_capabilities_remain_reachable() {
     // 3. Full CLI scan flag combinations
     let parsed_full = cli::parse([
         "--scan".to_string(),
-        "--frame".to_string(), "3".to_string(),
-        "--dpi".to_string(), "2900".to_string(),
-        "--samples".to_string(), "4".to_string(),
+        "--frame".to_string(),
+        "3".to_string(),
+        "--dpi".to_string(),
+        "2900".to_string(),
+        "--samples".to_string(),
+        "4".to_string(),
         "--clean".to_string(),
         "--tiff".to_string(),
-        "--roll".to_string(), "portra-400".to_string(),
-        "--offset-mm".to_string(), "+0.8".to_string(),
-        "--output".to_string(), "/scans/roll-1".to_string(),
-    ]).unwrap().unwrap();
+        "--roll".to_string(),
+        "portra-400".to_string(),
+        "--offset-mm".to_string(),
+        "+0.8".to_string(),
+        "--output".to_string(),
+        "/scans/roll-1".to_string(),
+    ])
+    .unwrap()
+    .unwrap();
 
     assert!(parsed_full.scan);
     assert_eq!(parsed_full.frame, Some(3));
@@ -141,7 +151,9 @@ fn phase12_all_cli_scan_capabilities_remain_reachable() {
     assert_eq!(parsed_full.output.as_deref(), Some("/scans/roll-1"));
 
     // 4. High-fidelity shortcut flag
-    let parsed_hq = cli::parse(["--scan".to_string(), "--high-fidelity".to_string()]).unwrap().unwrap();
+    let parsed_hq = cli::parse(["--scan".to_string(), "--high-fidelity".to_string()])
+        .unwrap()
+        .unwrap();
     assert!(parsed_hq.scan);
     assert!(parsed_hq.high_fidelity);
 

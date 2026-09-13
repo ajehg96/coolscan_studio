@@ -1,7 +1,7 @@
 use coolscan_studio::{
     processing::{
-        analysis::{SampleRect, TechnicalAnalysis, WorkingImage},
         Orientation, RollProfile, ScannerColorPipeline,
+        analysis::{SampleRect, TechnicalAnalysis, WorkingImage},
     },
     ui::{ReviewFrameState, SelectionStatus},
 };

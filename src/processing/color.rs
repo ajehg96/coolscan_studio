@@ -1,9 +1,9 @@
-use std::path::Path;
 use lcms2::{
     CIExyY, CIExyYTRIPLE, DisallowCache, Flags, GlobalContext, Intent, PixelFormat, Profile,
     ToneCurve, Transform,
 };
 use nkscan::{protocol::decode::Samples, scan::pass::Pass};
+use std::path::Path;
 
 /// Default embedded Nikon LS-4000 / LS-40 Negative input ICC profile.
 pub const DEFAULT_LS40_ICC_BYTES: &[u8] = include_bytes!("../../profiles/NKLS4000LS40_N.icc");
@@ -34,7 +34,10 @@ impl std::fmt::Display for ColorError {
             ColorError::Lcms(msg) => write!(f, "LittleCMS color management error: {msg}"),
             ColorError::Io(e) => write!(f, "I/O error reading color profile: {e}"),
             ColorError::InvalidChannelCount(c) => {
-                write!(f, "Invalid color channel count: expected 3 (RGB), found {c}")
+                write!(
+                    f,
+                    "Invalid color channel count: expected 3 (RGB), found {c}"
+                )
             }
             ColorError::IncompletePlane { expected, found } => {
                 write!(
@@ -92,8 +95,12 @@ pub fn make_linear_rec2020_profile() -> Result<Profile, ColorError> {
         },
     };
     let linear_curve = ToneCurve::new(1.0);
-    Profile::new_rgb(&d65, &primaries, &[&linear_curve, &linear_curve, &linear_curve])
-        .map_err(|_| ColorError::Lcms("Failed to create linear Rec.2020 profile".into()))
+    Profile::new_rgb(
+        &d65,
+        &primaries,
+        &[&linear_curve, &linear_curve, &linear_curve],
+    )
+    .map_err(|_| ColorError::Lcms("Failed to create linear Rec.2020 profile".into()))
 }
 
 /// Creates a linear sRGB profile (D65 white point, Rec.709 primaries, linear gamma 1.0).
@@ -121,8 +128,12 @@ pub fn make_linear_srgb_profile() -> Result<Profile, ColorError> {
         },
     };
     let linear_curve = ToneCurve::new(1.0);
-    Profile::new_rgb(&d65, &primaries, &[&linear_curve, &linear_curve, &linear_curve])
-        .map_err(|_| ColorError::Lcms("Failed to create linear sRGB profile".into()))
+    Profile::new_rgb(
+        &d65,
+        &primaries,
+        &[&linear_curve, &linear_curve, &linear_curve],
+    )
+    .map_err(|_| ColorError::Lcms("Failed to create linear sRGB profile".into()))
 }
 
 /// Color transformation pipeline backed by LittleCMS 2.
@@ -141,7 +152,10 @@ impl ScannerColorPipeline {
     }
 
     /// Creates a pipeline from an ICC profile file path.
-    pub fn from_icc_file(path: &Path, working_space: WorkingColorSpace) -> Result<Self, ColorError> {
+    pub fn from_icc_file(
+        path: &Path,
+        working_space: WorkingColorSpace,
+    ) -> Result<Self, ColorError> {
         let bytes = std::fs::read(path).map_err(ColorError::Io)?;
         Self::from_icc_bytes(&bytes, working_space)
     }
@@ -151,8 +165,8 @@ impl ScannerColorPipeline {
         icc_bytes: &[u8],
         working_space: WorkingColorSpace,
     ) -> Result<Self, ColorError> {
-        let in_profile =
-            Profile::new_icc(icc_bytes).map_err(|_| ColorError::Lcms("Invalid input ICC profile".into()))?;
+        let in_profile = Profile::new_icc(icc_bytes)
+            .map_err(|_| ColorError::Lcms("Invalid input ICC profile".into()))?;
 
         let out_profile = match working_space {
             WorkingColorSpace::LinearRec2020 => make_linear_rec2020_profile()?,
@@ -171,7 +185,9 @@ impl ScannerColorPipeline {
             Intent::Perceptual,
             Flags::NO_CACHE,
         )
-        .map_err(|_| ColorError::Lcms("Failed to build 16-bit to working space transform".into()))?;
+        .map_err(|_| {
+            ColorError::Lcms("Failed to build 16-bit to working space transform".into())
+        })?;
 
         let flt_to_working = Transform::new_flags_context(
             GlobalContext::new(),
@@ -247,9 +263,10 @@ impl ColorTransform for ScannerColorPipeline {
             return Err(ColorError::InvalidChannelCount(samples.colors.len()));
         }
 
-        let pixels = pass.rows.checked_mul(pass.cols).ok_or_else(|| {
-            ColorError::Lcms("Pass dimensions overflow".into())
-        })?;
+        let pixels = pass
+            .rows
+            .checked_mul(pass.cols)
+            .ok_or_else(|| ColorError::Lcms("Pass dimensions overflow".into()))?;
 
         for plane in &samples.colors {
             if plane.len() < pixels {
@@ -273,9 +290,9 @@ impl ColorTransform for ScannerColorPipeline {
             let end = (start + CHUNK_SIZE).min(pixels);
             let len = end - start;
 
-            for i in 0..len {
+            for (i, dst) in chunk_in[..len].iter_mut().enumerate() {
                 let p = start + i;
-                chunk_in[i] = [red[p], green[p], blue[p]];
+                *dst = [red[p], green[p], blue[p]];
             }
 
             self.u16_to_working
@@ -317,9 +334,10 @@ impl ColorTransform for IdentityColorTransform {
             return Err(ColorError::InvalidChannelCount(samples.colors.len()));
         }
 
-        let pixels = pass.rows.checked_mul(pass.cols).ok_or_else(|| {
-            ColorError::Lcms("Pass dimensions overflow".into())
-        })?;
+        let pixels = pass
+            .rows
+            .checked_mul(pass.cols)
+            .ok_or_else(|| ColorError::Lcms("Pass dimensions overflow".into()))?;
 
         for plane in &samples.colors {
             if plane.len() < pixels {
@@ -364,9 +382,21 @@ mod tests {
         let transformed = pipeline.transform_u16_rgb([58752, 59590, 57775]);
         // Parity check against LittleCMS reference calculation:
         // Expected approx: R ~ 0.8999, G ~ 0.9077, B ~ 0.8851
-        assert!((transformed[0] - 0.899875).abs() < 1e-3, "R: {}", transformed[0]);
-        assert!((transformed[1] - 0.907703).abs() < 1e-3, "G: {}", transformed[1]);
-        assert!((transformed[2] - 0.885087).abs() < 1e-3, "B: {}", transformed[2]);
+        assert!(
+            (transformed[0] - 0.899875).abs() < 1e-3,
+            "R: {}",
+            transformed[0]
+        );
+        assert!(
+            (transformed[1] - 0.907703).abs() < 1e-3,
+            "G: {}",
+            transformed[1]
+        );
+        assert!(
+            (transformed[2] - 0.885087).abs() < 1e-3,
+            "B: {}",
+            transformed[2]
+        );
     }
 
     #[test]

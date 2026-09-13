@@ -435,11 +435,7 @@ pub fn auto_print_exposure(
 }
 
 /// Convenience function rendering positive image from Negadoctor parameters.
-pub fn render_positive(
-    params: &NegadoctorParams,
-    input: &[[f32; 3]],
-    output: &mut [[f32; 3]],
-) {
+pub fn render_positive(params: &NegadoctorParams, input: &[[f32; 3]], output: &mut [[f32; 3]]) {
     let prepared = params.prepare();
     prepared.render_positive(input, output);
 }
@@ -468,7 +464,10 @@ mod tests {
         // Channel 2: log10(0.90 / 1.80) / 2.0 = log10(0.5) / 2.0 = -0.1505
         let sample_max = [0.90, 0.45, 1.80];
         let bias = auto_scan_bias(dmin, dmax, sample_max);
-        assert!((bias - (-0.1505)).abs() < 1e-4, "Expected -0.1505, got {bias}");
+        assert!(
+            (bias - (-0.1505)).abs() < 1e-4,
+            "Expected -0.1505, got {bias}"
+        );
     }
 
     #[test]
@@ -487,8 +486,8 @@ mod tests {
             (min_coeff - 1.0).abs() < 1e-5,
             "Expected minimum WB channel to be 1.0, got {min_coeff}"
         );
-        for c in 0..3 {
-            assert!(wb_high[c] >= 1.0 - 1e-5);
+        for &val in &wb_high {
+            assert!(val >= 1.0 - 1e-5);
         }
     }
 
@@ -589,9 +588,21 @@ mod tests {
             params.dmin[2] * 10.0f32.powf(-2.8),
         ];
         let highlight_out = prepared.invert_pixel(highlight_negative);
-        assert!(highlight_out[0] > 0.9, "Highlight Red: {}", highlight_out[0]);
-        assert!(highlight_out[1] > 0.9, "Highlight Green: {}", highlight_out[1]);
-        assert!(highlight_out[2] > 0.85, "Highlight Blue: {}", highlight_out[2]);
+        assert!(
+            highlight_out[0] > 0.9,
+            "Highlight Red: {}",
+            highlight_out[0]
+        );
+        assert!(
+            highlight_out[1] > 0.9,
+            "Highlight Green: {}",
+            highlight_out[1]
+        );
+        assert!(
+            highlight_out[2] > 0.85,
+            "Highlight Blue: {}",
+            highlight_out[2]
+        );
         assert!(highlight_out[0] <= 1.0, "Highlights must not exceed 1.0");
     }
 

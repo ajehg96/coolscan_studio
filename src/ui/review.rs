@@ -11,13 +11,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::darktable::xmp::{DarktableError, DarktableXmp};
 use crate::processing::analysis::{
-    finish_after_white_balance, sample_highlight_wb, SampleRect, TechnicalAnalysis, WorkingImage,
+    SampleRect, TechnicalAnalysis, WorkingImage, finish_after_white_balance, sample_highlight_wb,
 };
 use crate::processing::color::{ColorError, ScannerColorPipeline};
 use crate::processing::negadoctor::{NegadoctorParams, THRESHOLD};
 use crate::processing::orientation::{Orientation, OrientationScope};
 use crate::processing::roll::{PreparedFrame, RollProfile};
-
 
 /// Status and feedback of a highlight white-balance selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,10 +42,16 @@ impl std::fmt::Display for SelectionStatus {
                 write!(f, "Selection too small ({width}x{height}, minimum 4x4)")
             }
             SelectionStatus::TooDark => {
-                write!(f, "Selected area is too dark; pick a bright neutral highlight")
+                write!(
+                    f,
+                    "Selected area is too dark; pick a bright neutral highlight"
+                )
             }
             SelectionStatus::Clipped => {
-                write!(f, "Selected area is sensor-clipped; pick an unclipped highlight")
+                write!(
+                    f,
+                    "Selected area is sensor-clipped; pick an unclipped highlight"
+                )
             }
         }
     }
@@ -337,7 +342,7 @@ impl ReviewSession {
 
         let mut frames = Vec::with_capacity(prepared.len());
 
-        for (i, p) in prepared.into_iter().enumerate() {
+        for p in prepared {
             let effective = p
                 .source
                 .get_effective_image()
@@ -347,12 +352,8 @@ impl ReviewSession {
                 effective.pass(),
                 &color_pipeline,
             )?;
-            let mut frame_state = ReviewFrameState::new(
-                i + 1,
-                working_image,
-                &p.roll,
-                p.technical,
-            );
+            let mut frame_state =
+                ReviewFrameState::new(p.source.frame_number, working_image, &p.roll, p.technical);
             frame_state.orientation = p.orientation;
             frame_state.params = p.params;
             frame_state.source_artifact = Some(p.source);
@@ -378,13 +379,8 @@ impl ReviewSession {
             effective.pass(),
             &self.color_pipeline,
         )?;
-        let frame_num = self.frames.len() + 1;
-        let mut frame_state = ReviewFrameState::new(
-            frame_num,
-            working_image,
-            &p.roll,
-            p.technical,
-        );
+        let frame_num = p.source.frame_number;
+        let mut frame_state = ReviewFrameState::new(frame_num, working_image, &p.roll, p.technical);
         frame_state.orientation = p.orientation;
         frame_state.params = p.params;
         frame_state.source_artifact = Some(p.source);
@@ -444,15 +440,9 @@ impl ReviewSession {
         }
 
         let range: Box<dyn Iterator<Item = usize>> = match scope {
-            OrientationScope::CurrentFrame => {
-                Box::new(std::iter::once(self.current_index))
-            }
-            OrientationScope::RemainingFrames => {
-                Box::new(self.current_index..self.frames.len())
-            }
-            OrientationScope::WholeStrip => {
-                Box::new(0..self.frames.len())
-            }
+            OrientationScope::CurrentFrame => Box::new(std::iter::once(self.current_index)),
+            OrientationScope::RemainingFrames => Box::new(self.current_index..self.frames.len()),
+            OrientationScope::WholeStrip => Box::new(0..self.frames.len()),
         };
 
         for idx in range {
@@ -474,15 +464,9 @@ impl ReviewSession {
         }
 
         let range: Box<dyn Iterator<Item = usize>> = match scope {
-            OrientationScope::CurrentFrame => {
-                Box::new(std::iter::once(self.current_index))
-            }
-            OrientationScope::RemainingFrames => {
-                Box::new(self.current_index..self.frames.len())
-            }
-            OrientationScope::WholeStrip => {
-                Box::new(0..self.frames.len())
-            }
+            OrientationScope::CurrentFrame => Box::new(std::iter::once(self.current_index)),
+            OrientationScope::RemainingFrames => Box::new(self.current_index..self.frames.len()),
+            OrientationScope::WholeStrip => Box::new(0..self.frames.len()),
         };
 
         for idx in range {
@@ -537,9 +521,9 @@ impl ReviewSession {
         &self,
         output_dir: &std::path::Path,
     ) -> Result<std::path::PathBuf, DarktableError> {
-        let frame = self.current_frame().ok_or_else(|| {
-            DarktableError::MissingHistoryItem("No active frame".into())
-        })?;
+        let frame = self
+            .current_frame()
+            .ok_or_else(|| DarktableError::MissingHistoryItem("No active frame".into()))?;
         let xmp = self.current_darktable_xmp().ok_or_else(|| {
             DarktableError::MissingHistoryItem("Could not generate XMP for frame".into())
         })?;
@@ -553,7 +537,9 @@ impl ReviewSession {
         &self,
         output_dir: &std::path::Path,
     ) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
-        let frame = self.current_frame().ok_or_else(|| "No active frame".to_string())?;
+        let frame = self
+            .current_frame()
+            .ok_or_else(|| "No active frame".to_string())?;
         if !output_dir.exists() {
             std::fs::create_dir_all(output_dir).map_err(|e| e.to_string())?;
         }
@@ -563,8 +549,13 @@ impl ReviewSession {
         if let Some(artifact) = &frame.source_artifact {
             let effective = artifact.get_effective_image().map_err(|e| e.to_string())?;
             let path_str = tiff_path.to_str().ok_or("Invalid TIFF path string")?;
-            crate::tiff::write_tiff(path_str, effective.samples(), effective.pass(), artifact.dpi)
-                .map_err(|e| e.to_string())?;
+            crate::tiff::write_tiff(
+                path_str,
+                effective.samples(),
+                effective.pass(),
+                artifact.dpi,
+            )
+            .map_err(|e| e.to_string())?;
         }
 
         // Save Darktable XMP sidecar
@@ -579,6 +570,7 @@ impl ReviewSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::FrameArtifact;
 
     fn mock_working_image(width: usize, height: usize) -> WorkingImage {
         // Creates an image with highlights in top-left, shadows in bottom-right
@@ -844,5 +836,103 @@ mod tests {
         assert!((extracted_params.dmax - 3.10).abs() < 1e-4);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    fn mock_prepared_frame(frame_number: usize) -> PreparedFrame {
+        let profile = RollProfile::pro_image_100();
+        let artifact = FrameArtifact {
+            frame_number,
+            total_frames: 6,
+            dpi: 725,
+            raw_rect: nkscan::protocol::data::Rect {
+                left: 0,
+                right: 2,
+                top: 0,
+                bottom: 2,
+            },
+            samples: nkscan::protocol::decode::Samples {
+                colors: vec![
+                    vec![1000, 1000, 1000, 1000],
+                    vec![1000, 1000, 1000, 1000],
+                    vec![1000, 1000, 1000, 1000],
+                ],
+                ir: None,
+            },
+            pass: nkscan::scan::pass::Pass {
+                layout: nkscan::protocol::image::Layout::single_line(2, 2, vec![1]),
+                cooperation: Vec::new(),
+                complete: true,
+                blocks: 1,
+                rows: 2,
+                cols: 2,
+            },
+            crop: None,
+            scan_metadata: crate::scanner::types::ScanMetadata {
+                scanner_model: None,
+                focus_position: None,
+                exposures: None,
+                hardware_samples: 1,
+                software_passes: 1,
+                infrared_cleaned_pixels: None,
+            },
+            roll: Some(profile.clone()),
+        };
+        PreparedFrame::new(artifact, profile)
+    }
+
+    #[test]
+    fn sparse_frame_numbering_preserved_end_to_end() {
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let prepared = vec![
+            mock_prepared_frame(2),
+            mock_prepared_frame(4),
+            mock_prepared_frame(6),
+        ];
+
+        let mut session = ReviewSession::from_prepared_frames(prepared, pipeline).unwrap();
+        assert_eq!(session.frame_count(), 3);
+        assert_eq!(session.frames[0].frame_number, 2);
+        assert_eq!(session.frames[1].frame_number, 4);
+        assert_eq!(session.frames[2].frame_number, 6);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("sparse_frames_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        // Frame 2
+        let (tif2, xmp2) = session.save_current_frame_and_xmp(&temp_dir).unwrap();
+        assert_eq!(tif2.file_name().unwrap(), "frame-2.tif");
+        assert_eq!(xmp2.file_name().unwrap(), "frame-2.tif.xmp");
+
+        // Frame 4
+        assert!(session.next_frame());
+        let (tif4, xmp4) = session.save_current_frame_and_xmp(&temp_dir).unwrap();
+        assert_eq!(tif4.file_name().unwrap(), "frame-4.tif");
+        assert_eq!(xmp4.file_name().unwrap(), "frame-4.tif.xmp");
+
+        // Frame 6
+        assert!(session.next_frame());
+        let (tif6, xmp6) = session.save_current_frame_and_xmp(&temp_dir).unwrap();
+        assert_eq!(tif6.file_name().unwrap(), "frame-6.tif");
+        assert_eq!(xmp6.file_name().unwrap(), "frame-6.tif.xmp");
+
+        assert!(!temp_dir.join("frame-1.tif").exists());
+        assert!(!temp_dir.join("frame-3.tif").exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn single_frame_and_dynamic_add_preserves_numbering() {
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let mut session =
+            ReviewSession::from_prepared_frames(vec![mock_prepared_frame(4)], pipeline).unwrap();
+        assert_eq!(session.frame_count(), 1);
+        assert_eq!(session.current_frame().unwrap().frame_number, 4);
+
+        // Dynamically append frame 7
+        session.add_prepared_frame(mock_prepared_frame(7)).unwrap();
+        assert_eq!(session.frame_count(), 2);
+        assert_eq!(session.frames[1].frame_number, 7);
     }
 }

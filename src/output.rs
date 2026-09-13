@@ -1,11 +1,7 @@
-use std::path::{Path, PathBuf};
 use nkscan::{protocol::decode::Samples, scan::pass::Pass};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    bmp,
-    scanner::types::FrameArtifact,
-    tiff,
-};
+use crate::{bmp, scanner::types::FrameArtifact, tiff};
 
 /// Configuration specifying which image formats and destinations to write.
 #[derive(Debug, Clone)]
@@ -183,7 +179,12 @@ mod tests {
             frame_number: 1,
             total_frames: 1,
             dpi: 725,
-            raw_rect: Rect { left: 0, right: 2, top: 0, bottom: 2 },
+            raw_rect: Rect {
+                left: 0,
+                right: 2,
+                top: 0,
+                bottom: 2,
+            },
             samples,
             pass,
             crop: None,
@@ -211,4 +212,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-
