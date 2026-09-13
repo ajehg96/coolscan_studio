@@ -28,6 +28,17 @@ fn main() {
         }
     };
 
+    if options.version {
+        println!("Coolscan Studio v{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
+    if options.diagnose {
+        let diag = coolscan_studio::diagnostics::SystemDiagnostics::probe();
+        diag.print_report();
+        return;
+    }
+
     let launch_gui = options.gui
         || options.mock
         || (!options.scan && !options.eject && options.frame.is_none());

@@ -387,11 +387,28 @@ impl ReviewApp {
                         });
                     }
 
+                    // System & Environment Diagnostics
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.label(RichText::new("Environment & Darktable:").strong());
+                    if let Some(dt) = crate::diagnostics::detect_darktable_cli() {
+                        ui.colored_label(
+                            Color32::from_rgb(100, 240, 100),
+                            format!("✓ darktable-cli detected ({})", dt.display()),
+                        );
+                    } else {
+                        ui.colored_label(
+                            Color32::from_rgb(240, 200, 100),
+                            "Notice: darktable-cli not found in standard paths",
+                        );
+                    }
+                    ui.small("Color engine: LittleCMS 2 (Linear Rec.2020 / sRGB)");
+
                     // Overscan Diagnostics
                     if let Some(d) = &self.scan_setup.last_discovery {
                         ui.add_space(4.0);
                         ui.separator();
-                        ui.label(RichText::new("Diagnostics:").strong());
+                        ui.label(RichText::new("Strip Diagnostics:").strong());
                         ui.small(format!("Optical DPI: {} x {}", d.optical_dpi.0, d.optical_dpi.1));
                         ui.small(format!("Discovered frames count: {}", d.detected_frames.len()));
                         ui.small(format!("Framing method: {:?}", d.framing));

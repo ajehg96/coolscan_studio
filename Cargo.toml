@@ -2,6 +2,11 @@
 name = "coolscan-studio"
 version = "0.1.0"
 edition = "2024"
+authors = ["Austin <austin@activexray.com>"]
+description = "Darktable-compatible post-scan review studio and controller for Nikon Coolscan scanners"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/activexray/coolscan-studio"
 
 [dependencies]
 nkscan = { git = "https://github.com/activexray/nkscan", rev = "4f276883e3971aac92fa58a3d8284994105f80d8" }

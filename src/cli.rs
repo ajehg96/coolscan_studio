@@ -13,6 +13,8 @@ pub const HELP: &str = "Usage: coolscan-studio [OPTIONS]\n\
     --no-auto-crop   Disable automatic border detection and keep raw overscan images.\n\
     --roll PROFILE   Roll profile file path or preset name (e.g. 'pro-image-100').\n\
     --offset-mm MM   Shift along film travel; defaults to 0.\n\
+    --diagnose       Run system environment, USB driver, and Darktable diagnostics.\n\
+    --version, -V    Show program version.\n\
     --help           Show help without opening the scanner.\n\
 \n\
 With --gui, coolscan-studio starts the Darktable-integrated graphical review studio.\n\
@@ -38,6 +40,8 @@ pub struct Options {
     pub roll: Option<String>,
     pub gui: bool,
     pub mock: bool,
+    pub diagnose: bool,
+    pub version: bool,
 }
 
 impl Default for Options {
@@ -57,6 +61,8 @@ impl Default for Options {
             roll: None,
             gui: false,
             mock: false,
+            diagnose: false,
+            version: false,
         }
     }
 }
@@ -85,6 +91,12 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
             "--mock" => {
                 options.mock = true;
                 options.gui = true;
+            }
+            "--diagnose" => {
+                options.diagnose = true;
+            }
+            "--version" | "-V" => {
+                options.version = true;
             }
             "--scan" => {
                 options.scan = true;
@@ -250,6 +262,27 @@ mod tests {
                 .unwrap()
                 .offset_mm,
             -1.8
+        );
+        assert_eq!(
+            parse_words("--diagnose").unwrap(),
+            Some(Options {
+                diagnose: true,
+                ..Options::default()
+            })
+        );
+        assert_eq!(
+            parse_words("--version").unwrap(),
+            Some(Options {
+                version: true,
+                ..Options::default()
+            })
+        );
+        assert_eq!(
+            parse_words("-V").unwrap(),
+            Some(Options {
+                version: true,
+                ..Options::default()
+            })
         );
         assert_eq!(parse_words("--frame 1").unwrap().unwrap().offset_mm, 0.0);
         assert_eq!(parse_words("").unwrap().unwrap().frame, None);
