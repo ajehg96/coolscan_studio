@@ -192,6 +192,30 @@ impl RollProfile {
         }
     }
 
+    /// Kodak Portra 400 preset profile.
+    pub fn portra_400() -> Self {
+        Self {
+            version: CURRENT_SCHEMA_VERSION,
+            id: RollId("kodak-portra-400".into()),
+            name: "Kodak Portra 400".into(),
+            film_stock: "Kodak Portra 400".into(),
+            dmin: [0.8850, 0.9020, 0.8750],
+            scanner_profile: ScannerProfile::ls40_negative(),
+        }
+    }
+
+    /// Kodak Gold 200 preset profile.
+    pub fn gold_200() -> Self {
+        Self {
+            version: CURRENT_SCHEMA_VERSION,
+            id: RollId("kodak-gold-200".into()),
+            name: "Kodak Gold 200".into(),
+            film_stock: "Kodak Gold 200".into(),
+            dmin: [0.9100, 0.9250, 0.8900],
+            scanner_profile: ScannerProfile::ls40_negative(),
+        }
+    }
+
     /// Serializes to formatted JSON.
     pub fn to_json(&self) -> Result<String, RollProfileError> {
         serde_json::to_string_pretty(self).map_err(RollProfileError::Json)

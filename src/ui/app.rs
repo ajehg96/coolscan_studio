@@ -19,8 +19,59 @@ use std::time::{Duration, Instant};
 use super::review::{ReviewSession, SelectionStatus};
 use crate::processing::analysis::SampleRect;
 use crate::processing::orientation::OrientationScope;
-use crate::scanner::types::{FrameSelection, ScanEvent, ScanRequest};
+use crate::processing::RollProfile;
+use crate::scanner::types::{FrameSelection, ScanEvent, ScanRequest, StripDiscovery};
 use crate::scanner::worker::{ScanCommand, ScannerWorkerHandle, WorkerMessage};
+
+/// Scanner quality preset for multi-sampling and fidelity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QualityPreset {
+    Standard, // 1x pass
+    Fine,     // 4x passes
+    Ultimate, // 16x passes
+    Custom,   // user-defined sample count
+}
+
+/// GUI Scan configuration state covering both Basic and Advanced scanning controls.
+#[derive(Debug, Clone)]
+pub struct ScanSetupState {
+    // Basic Controls
+    pub resolution_dpi: u16,
+    pub dust_removal: bool,
+    pub quality: QualityPreset,
+    pub output_dir_str: String,
+    pub film_stock_index: usize,
+
+    // Advanced Controls
+    pub show_setup_modal: bool,
+    pub show_advanced: bool,
+    pub samples: u8,
+    pub all_frames: bool,
+    pub frame_selected: [bool; 6],
+    pub auto_crop: bool,
+    pub scanner_offset_mm: f64,
+    pub last_discovery: Option<StripDiscovery>,
+}
+
+impl Default for ScanSetupState {
+    fn default() -> Self {
+        Self {
+            resolution_dpi: 2900,
+            dust_removal: true,
+            quality: QualityPreset::Standard,
+            output_dir_str: "./scans".into(),
+            film_stock_index: 0,
+            show_setup_modal: false,
+            show_advanced: false,
+            samples: 1,
+            all_frames: true,
+            frame_selected: [true; 6],
+            auto_crop: true,
+            scanner_offset_mm: 0.0,
+            last_discovery: None,
+        }
+    }
+}
 
 /// The desktop review application state.
 pub struct ReviewApp {
@@ -46,6 +97,8 @@ pub struct ReviewApp {
     pub output_dir: PathBuf,
     /// Timestamped save confirmation notification.
     pub save_notification: Option<(String, Instant)>,
+    /// Live scanner setup and configuration options.
+    pub scan_setup: ScanSetupState,
 }
 
 impl ReviewApp {
@@ -63,6 +116,7 @@ impl ReviewApp {
             status_message: "Ready".into(),
             output_dir: PathBuf::from("./scans"),
             save_notification: None,
+            scan_setup: ScanSetupState::default(),
         }
     }
 
@@ -74,7 +128,9 @@ impl ReviewApp {
 
     /// Configures the output directory for TIFF and XMP sidecar exports.
     pub fn with_output_dir(mut self, path: impl Into<PathBuf>) -> Self {
-        self.output_dir = path.into();
+        let pb = path.into();
+        self.scan_setup.output_dir_str = pb.to_string_lossy().to_string();
+        self.output_dir = pb;
         self
     }
 
@@ -156,6 +212,7 @@ impl ReviewApp {
                 WorkerMessage::DiscoveryReady(discovery) => {
                     self.status_message =
                         format!("Discovered {} frames", discovery.frames().len());
+                    self.scan_setup.last_discovery = Some(discovery);
                 }
                 WorkerMessage::StripScanComplete => {
                     self.is_scanning = false;
@@ -176,6 +233,192 @@ impl ReviewApp {
             }
         }
     }
+
+    /// Constructs a validated ScanRequest from the current GUI setup state.
+    pub fn build_scan_request(&self) -> ScanRequest {
+        let frames = if self.scan_setup.all_frames {
+            FrameSelection::All
+        } else {
+            let list: Vec<usize> = self
+                .scan_setup
+                .frame_selected
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &sel)| if sel { Some(i + 1) } else { None })
+                .collect();
+            if list.is_empty() {
+                FrameSelection::All
+            } else {
+                FrameSelection::List(list)
+            }
+        };
+
+        let samples = match self.scan_setup.quality {
+            QualityPreset::Standard => 1,
+            QualityPreset::Fine => 4,
+            QualityPreset::Ultimate => 16,
+            QualityPreset::Custom => self.scan_setup.samples,
+        };
+
+        let roll = match self.scan_setup.film_stock_index {
+            1 => RollProfile::portra_400(),
+            2 => RollProfile::gold_200(),
+            _ => RollProfile::pro_image_100(),
+        };
+
+        ScanRequest::new(
+            frames,
+            self.scan_setup.resolution_dpi,
+            samples,
+            self.scan_setup.dust_removal,
+            self.scan_setup.auto_crop,
+        )
+        .with_roll(roll)
+        .with_offset_mm(self.scan_setup.scanner_offset_mm)
+    }
+
+    /// Triggers a scan using the current GUI configuration settings.
+    pub fn start_scan(&mut self) {
+        let req = self.build_scan_request();
+        if let Some(roll) = &req.roll {
+            self.session.roll = roll.clone();
+        }
+        if let Some(worker) = &self.worker {
+            worker.send(ScanCommand::StartScan(req));
+            self.is_scanning = true;
+            self.status_message = "Starting scan...".into();
+            self.scan_setup.show_setup_modal = false;
+        }
+    }
+
+    /// Renders the scanner setup modal dialog.
+    pub fn render_scan_setup_window(&mut self, ctx: &egui::Context) {
+        if !self.scan_setup.show_setup_modal {
+            return;
+        }
+
+        let mut is_open = self.scan_setup.show_setup_modal;
+        egui::Window::new("⚙ Scanner Setup & Controls")
+            .open(&mut is_open)
+            .resizable(true)
+            .default_width(450.0)
+            .show(ctx, |ui| {
+                ui.heading("Basic Controls");
+                ui.separator();
+
+                // Resolution
+                ui.horizontal(|ui| {
+                    ui.label("Resolution:");
+                    ui.radio_value(&mut self.scan_setup.resolution_dpi, 725, "725 DPI (Preview)");
+                    ui.radio_value(&mut self.scan_setup.resolution_dpi, 1450, "1450 DPI");
+                    ui.radio_value(&mut self.scan_setup.resolution_dpi, 2900, "2900 DPI (Native)");
+                });
+
+                // Dust removal
+                ui.checkbox(&mut self.scan_setup.dust_removal, "Dust & Scratch Removal (OpenICE)");
+
+                // Quality preset
+                ui.horizontal(|ui| {
+                    ui.label("Quality Preset:");
+                    if ui.radio_value(&mut self.scan_setup.quality, QualityPreset::Standard, "Standard (1x)").clicked() {
+                        self.scan_setup.samples = 1;
+                    }
+                    if ui.radio_value(&mut self.scan_setup.quality, QualityPreset::Fine, "Fine (4x)").clicked() {
+                        self.scan_setup.samples = 4;
+                    }
+                    if ui.radio_value(&mut self.scan_setup.quality, QualityPreset::Ultimate, "Ultimate (16x)").clicked() {
+                        self.scan_setup.samples = 16;
+                    }
+                });
+
+                // Output folder
+                ui.horizontal(|ui| {
+                    ui.label("Output folder:");
+                    if ui.text_edit_singleline(&mut self.scan_setup.output_dir_str).changed() {
+                        self.output_dir = PathBuf::from(&self.scan_setup.output_dir_str);
+                    }
+                });
+
+                // Film profile
+                ui.horizontal(|ui| {
+                    ui.label("Film Profile:");
+                    egui::ComboBox::from_id_salt("film_stock_combo")
+                        .selected_text(match self.scan_setup.film_stock_index {
+                            1 => "Kodak Portra 400",
+                            2 => "Kodak Gold 200",
+                            _ => "Kodak Pro Image 100",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.scan_setup.film_stock_index, 0, "Kodak Pro Image 100");
+                            ui.selectable_value(&mut self.scan_setup.film_stock_index, 1, "Kodak Portra 400");
+                            ui.selectable_value(&mut self.scan_setup.film_stock_index, 2, "Kodak Gold 200");
+                        });
+                });
+
+                ui.add_space(8.0);
+                ui.collapsing("▶ Advanced Scanner Controls", |ui| {
+                    // Samples slider
+                    ui.horizontal(|ui| {
+                        ui.label("Multi-sample count:");
+                        if ui.add(Slider::new(&mut self.scan_setup.samples, 1..=16).text("passes")).changed() {
+                            self.scan_setup.quality = QualityPreset::Custom;
+                        }
+                    });
+
+                    // Auto-crop
+                    ui.checkbox(&mut self.scan_setup.auto_crop, "Automatic edge detection & border crop");
+
+                    // Travel offset
+                    ui.horizontal(|ui| {
+                        ui.label("Scanner travel offset:");
+                        ui.add(Slider::new(&mut self.scan_setup.scanner_offset_mm, -5.0..=5.0).step_by(0.1).suffix(" mm"));
+                    });
+
+                    // Manual frame selection
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Frame Selection:").strong());
+                    ui.radio_value(&mut self.scan_setup.all_frames, true, "Scan all discovered frames on strip");
+                    ui.radio_value(&mut self.scan_setup.all_frames, false, "Manual frame selection");
+                    if !self.scan_setup.all_frames {
+                        ui.horizontal(|ui| {
+                            for f in 0..6 {
+                                ui.checkbox(&mut self.scan_setup.frame_selected[f], format!("#{}", f + 1));
+                            }
+                        });
+                    }
+
+                    // Overscan Diagnostics
+                    if let Some(d) = &self.scan_setup.last_discovery {
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.label(RichText::new("Diagnostics:").strong());
+                        ui.small(format!("Optical DPI: {} x {}", d.optical_dpi.0, d.optical_dpi.1));
+                        ui.small(format!("Discovered frames count: {}", d.detected_frames.len()));
+                        ui.small(format!("Framing method: {:?}", d.framing));
+                    }
+                });
+
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    let start_btn = Button::new(
+                        RichText::new("▶ Start Scan")
+                            .color(Color32::WHITE)
+                            .strong(),
+                    )
+                    .fill(Color32::from_rgb(40, 160, 60));
+
+                    if ui.add(start_btn).clicked() {
+                        self.start_scan();
+                    }
+
+                    if ui.button("Close").clicked() {
+                        self.scan_setup.show_setup_modal = false;
+                    }
+                });
+            });
+
+        self.scan_setup.show_setup_modal = is_open;
+    }
 }
 
 impl eframe::App for ReviewApp {
@@ -184,6 +427,9 @@ impl eframe::App for ReviewApp {
 
         // Process incoming background scanner messages
         self.poll_worker();
+
+        // Render modal windows
+        self.render_scan_setup_window(&ctx);
 
         // Handle keyboard navigation shortcuts
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
@@ -240,7 +486,7 @@ impl eframe::App for ReviewApp {
                 );
 
                 // Scanner Worker Live Controls
-                if let Some(worker) = &self.worker {
+                if self.worker.is_some() {
                     ui.separator();
                     if self.is_scanning {
                         if ui
@@ -250,10 +496,14 @@ impl eframe::App for ReviewApp {
                             )
                             .clicked()
                         {
-                            worker.cancel_current();
+                            if let Some(w) = &self.worker {
+                                w.cancel_current();
+                            }
                         }
                         if ui.button("⏸ Stop After Frame").clicked() {
-                            worker.stop_after_current();
+                            if let Some(w) = &self.worker {
+                                w.stop_after_current();
+                            }
                         }
                     } else {
                         if ui
@@ -263,18 +513,21 @@ impl eframe::App for ReviewApp {
                             )
                             .clicked()
                         {
-                            let req =
-                                ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
-                            worker.send(ScanCommand::StartScan(req));
-                            self.is_scanning = true;
-                            self.status_message = "Starting scan...".into();
+                            self.start_scan();
+                        }
+                        if ui.button("⚙ Setup").clicked() {
+                            self.scan_setup.show_setup_modal = true;
                         }
                         if ui.button("🔍 Discover").clicked() {
-                            worker.send(ScanCommand::DiscoverStrip);
+                            if let Some(w) = &self.worker {
+                                w.send(ScanCommand::DiscoverStrip);
+                            }
                             self.status_message = "Discovering strip...".into();
                         }
                         if ui.button("⏏ Eject").clicked() {
-                            worker.eject();
+                            if let Some(w) = &self.worker {
+                                w.eject();
+                            }
                         }
                     }
                 }
@@ -571,13 +824,28 @@ impl ReviewApp {
                     });
                 } else {
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("No frames loaded").size(16.0));
-                        ui.add_space(4.0);
+                        ui.label(RichText::new("No frames loaded").size(18.0).strong());
+                        ui.add_space(8.0);
                         ui.label(
-                            RichText::new("Click '▶ Scan Strip' above to acquire frames.")
-                                .size(12.0)
+                            RichText::new("Load or scan a strip to begin post-scan review.")
+                                .size(13.0)
                                 .color(Color32::from_rgb(160, 160, 160)),
                         );
+                        ui.add_space(12.0);
+                        ui.horizontal(|ui| {
+                            let scan_btn = Button::new(
+                                RichText::new("▶ Scan Strip")
+                                    .color(Color32::WHITE)
+                                    .strong(),
+                            )
+                            .fill(Color32::from_rgb(40, 160, 60));
+                            if ui.add(scan_btn).clicked() {
+                                self.start_scan();
+                            }
+                            if ui.button("⚙ Scan Settings").clicked() {
+                                self.scan_setup.show_setup_modal = true;
+                            }
+                        });
                     });
                 }
             });
@@ -765,19 +1033,24 @@ impl ReviewApp {
     }
 }
 
-/// Launches the desktop GUI review window.
-pub fn run_review_gui(session: ReviewSession) -> eframe::Result<()> {
+/// Launches the desktop GUI review and scanning studio with the given app state.
+pub fn run_gui(app: ReviewApp) -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_title("Coolscan Studio — Review"),
+            .with_title("Coolscan Studio"),
         ..Default::default()
     };
     eframe::run_native(
-        "Coolscan Studio — Review",
+        "Coolscan Studio",
         native_options,
-        Box::new(|_cc| Ok(Box::new(ReviewApp::new(session)))),
+        Box::new(|_cc| Ok(Box::new(app))),
     )
+}
+
+/// Launches the desktop GUI review window for a pre-loaded session.
+pub fn run_review_gui(session: ReviewSession) -> eframe::Result<()> {
+    run_gui(ReviewApp::new(session))
 }
 

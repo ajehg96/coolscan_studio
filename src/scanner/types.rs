@@ -38,6 +38,7 @@ pub struct ScanRequest {
     pub clean: bool,
     pub auto_crop: bool,
     pub roll: Option<RollProfile>,
+    pub offset_mm: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,12 +85,19 @@ impl ScanRequest {
             clean,
             auto_crop,
             roll: None,
+            offset_mm: 0.0,
         }
     }
 
     /// Associates a roll profile with this scan request.
     pub fn with_roll(mut self, roll: RollProfile) -> Self {
         self.roll = Some(roll);
+        self
+    }
+
+    /// Sets the travel offset in millimetres.
+    pub fn with_offset_mm(mut self, offset: f64) -> Self {
+        self.offset_mm = offset;
         self
     }
 

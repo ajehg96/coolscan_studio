@@ -16,9 +16,11 @@ use std::time::Duration;
 use nkscan::protocol::data::Rect;
 use nkscan::protocol::decode::Samples;
 use nkscan::scan::pass::Pass;
+use nkscan::session::Session;
 
 use crate::crop::{CropDecision, EdgeConfidence};
 use crate::processing::analysis::TechnicalAnalysis;
+use crate::processing::color::ScannerColorPipeline;
 use crate::processing::negadoctor::NegadoctorParams;
 use crate::processing::orientation::Orientation;
 use crate::processing::roll::{PreparedFrame, RollProfile};
@@ -326,6 +328,196 @@ impl ScannerBackend for MockScannerBackend {
     }
 }
 
+/// Scanner backend driving physical Nikon Coolscan hardware via USB.
+pub struct HardwareScannerBackend {
+    pub roll_profile: RollProfile,
+    pub color_pipeline: Option<ScannerColorPipeline>,
+}
+
+impl Default for HardwareScannerBackend {
+    fn default() -> Self {
+        Self::new(RollProfile::pro_image_100())
+    }
+}
+
+impl HardwareScannerBackend {
+    pub fn new(roll_profile: RollProfile) -> Self {
+        let color_pipeline = ScannerColorPipeline::default_ls40().ok();
+        Self {
+            roll_profile,
+            color_pipeline,
+        }
+    }
+}
+
+impl ScannerBackend for HardwareScannerBackend {
+    fn check_media(&mut self, emit: &mut dyn FnMut(WorkerMessage)) {
+        let scanners = nkscan::device::list();
+        let Some(scanner) = scanners.first() else {
+            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            return;
+        };
+
+        emit(WorkerMessage::Event(ScanEvent::ScannerFound {
+            description: scanner.to_string(),
+        }));
+
+        let transport = match scanner.open() {
+            Ok(t) => t,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to open scanner: {e}")));
+                return;
+            }
+        };
+
+        let mut session = match Session::open(transport) {
+            Ok(s) => s,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                return;
+            }
+        };
+
+        emit(WorkerMessage::Event(ScanEvent::SessionReady));
+
+        match session.media_loaded() {
+            Ok(loaded) => emit(WorkerMessage::Event(ScanEvent::MediaChecked { loaded })),
+            Err(e) => emit(WorkerMessage::Error(format!("Could not check media state: {e}"))),
+        }
+    }
+
+    fn discover_strip(&mut self, emit: &mut dyn FnMut(WorkerMessage)) {
+        let scanners = nkscan::device::list();
+        let Some(scanner) = scanners.first() else {
+            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            return;
+        };
+
+        let transport = match scanner.open() {
+            Ok(t) => t,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to open scanner: {e}")));
+                return;
+            }
+        };
+
+        let mut session = match Session::open(transport) {
+            Ok(s) => s,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                return;
+            }
+        };
+
+        match crate::scanner::pipeline::discover_strip(&mut session, |evt| {
+            emit(WorkerMessage::Event(evt));
+        }) {
+            Ok(discovery) => emit(WorkerMessage::DiscoveryReady(discovery)),
+            Err(e) => emit(WorkerMessage::Error(format!("Strip discovery failed: {e}"))),
+        }
+    }
+
+    fn scan_strip(
+        &mut self,
+        request: &ScanRequest,
+        _cancel_current: Arc<AtomicBool>,
+        _stop_after_current: Arc<AtomicBool>,
+        emit: &mut dyn FnMut(WorkerMessage),
+    ) {
+        let scanners = nkscan::device::list();
+        let Some(scanner) = scanners.first() else {
+            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            return;
+        };
+
+        let transport = match scanner.open() {
+            Ok(t) => t,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to open scanner: {e}")));
+                return;
+            }
+        };
+
+        let session = match Session::open(transport) {
+            Ok(s) => s,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                return;
+            }
+        };
+
+        let roll = request.roll.clone().unwrap_or_else(|| self.roll_profile.clone());
+        let default_pipeline;
+        let pipeline: &ScannerColorPipeline = match &self.color_pipeline {
+            Some(p) => p,
+            None => {
+                default_pipeline = match ScannerColorPipeline::default_ls40() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        emit(WorkerMessage::Error(format!("Color pipeline error: {e}")));
+                        return;
+                    }
+                };
+                &default_pipeline
+            }
+        };
+
+        let scan_result = crate::scanner::pipeline::scan_strip_with_session(
+            scanner,
+            session,
+            request,
+            None,
+            |evt| {
+                emit(WorkerMessage::Event(evt));
+            },
+        );
+
+        match scan_result {
+            Ok(result) => {
+                for artifact in result.frames {
+                    match PreparedFrame::from_artifact(artifact, roll.clone(), pipeline) {
+                        Ok(prepared) => emit(WorkerMessage::FrameReady(Box::new(prepared))),
+                        Err(e) => emit(WorkerMessage::Error(format!("Frame preparation error: {e}"))),
+                    }
+                }
+                emit(WorkerMessage::StripScanComplete);
+            }
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Scan failed: {e}")));
+            }
+        }
+    }
+
+    fn eject_film(&mut self, emit: &mut dyn FnMut(WorkerMessage)) {
+        let scanners = nkscan::device::list();
+        let Some(scanner) = scanners.first() else {
+            emit(WorkerMessage::Error("No Nikon Coolscan scanners found.".into()));
+            return;
+        };
+
+        let transport = match scanner.open() {
+            Ok(t) => t,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to open scanner: {e}")));
+                return;
+            }
+        };
+
+        let mut session = match Session::open(transport) {
+            Ok(s) => s,
+            Err(e) => {
+                emit(WorkerMessage::Error(format!("Failed to start scanner session: {e}")));
+                return;
+            }
+        };
+
+        match session.eject() {
+            Ok(_) => emit(WorkerMessage::FilmEjected),
+            Err(e) => emit(WorkerMessage::Error(format!("Eject failed: {e}"))),
+        }
+    }
+}
+
 /// Handle held by the UI thread to interact with the background scanner worker.
 pub struct ScannerWorkerHandle {
     cmd_tx: Sender<ScanCommand>,
@@ -396,6 +588,11 @@ impl ScannerWorkerHandle {
     /// Spawns a worker with the default simulated/mock backend.
     pub fn spawn_mock(frame_count: usize) -> Self {
         Self::spawn(MockScannerBackend::new(frame_count, Duration::ZERO))
+    }
+
+    /// Spawns a worker with the physical scanner hardware backend.
+    pub fn spawn_hardware(roll: RollProfile) -> Self {
+        Self::spawn(HardwareScannerBackend::new(roll))
     }
 
     /// Sends a command to the scanner worker.

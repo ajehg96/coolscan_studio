@@ -3,13 +3,15 @@ use coolscan_studio::{
     cli,
     frame_position::{self, FramePosition},
     output::{self, OutputPolicy},
-    processing::RollProfile,
+    processing::{RollProfile, ScannerColorPipeline},
     scanner::{
         discover_strip, dots_to_mm, scan_strip_with_session,
         types::{
             CropFallbackReason, FrameSelection, ScanEvent, ScanPhase, ScanRequest,
         },
+        worker::ScannerWorkerHandle,
     },
+    ui::{run_gui, ReviewApp, ReviewSession},
 };
 use nkscan::{device, session::Session};
 
@@ -25,6 +27,61 @@ fn main() {
             std::process::exit(2);
         }
     };
+
+    let launch_gui = options.gui
+        || options.mock
+        || (!options.scan && !options.eject && options.frame.is_none());
+
+    if launch_gui {
+        let roll = match options.roll.as_deref() {
+            Some("portra-400" | "portra400" | "portra") => RollProfile::portra_400(),
+            Some("gold-200" | "gold200" | "gold") => RollProfile::gold_200(),
+            Some("pro-image-100" | "proimage100" | "pro-image") => RollProfile::pro_image_100(),
+            Some(path) => match RollProfile::load_from_file(Path::new(path)) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Failed to load roll profile from {path}: {e}");
+                    std::process::exit(2);
+                }
+            },
+            None => RollProfile::pro_image_100(),
+        };
+
+        let worker = if options.mock {
+            println!("Coolscan Studio — Launching GUI in Mock Mode");
+            ScannerWorkerHandle::spawn_mock(6)
+        } else {
+            let scanners = device::list();
+            if scanners.is_empty() {
+                println!("No Nikon Coolscan scanners found. Launching GUI in Mock Mode.");
+                ScannerWorkerHandle::spawn_mock(6)
+            } else {
+                println!("Found scanner: {}", scanners[0]);
+                ScannerWorkerHandle::spawn_hardware(roll.clone())
+            }
+        };
+
+        let pipeline = match ScannerColorPipeline::default_ls40() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Failed to initialize LittleCMS color pipeline: {e}");
+                std::process::exit(2);
+            }
+        };
+
+        let session = ReviewSession::empty(roll, pipeline);
+        let out_dir = options.output.as_deref().unwrap_or("./scans");
+        let app = ReviewApp::new(session)
+            .with_worker(worker)
+            .with_output_dir(out_dir);
+
+        if let Err(e) = run_gui(app) {
+            eprintln!("GUI application error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     println!("Coolscan Studio");
     println!("---------------");
 
@@ -110,6 +167,24 @@ fn main() {
         };
 
         let roll_profile = match options.roll.as_deref() {
+            Some("portra-400" | "portra400" | "portra") => {
+                let p = RollProfile::portra_400();
+                println!("Roll profile: {} ({})", p.name, p.film_stock);
+                println!(
+                    "  D-min: R={:.4}, G={:.4}, B={:.4}",
+                    p.dmin[0], p.dmin[1], p.dmin[2]
+                );
+                Some(p)
+            }
+            Some("gold-200" | "gold200" | "gold") => {
+                let p = RollProfile::gold_200();
+                println!("Roll profile: {} ({})", p.name, p.film_stock);
+                println!(
+                    "  D-min: R={:.4}, G={:.4}, B={:.4}",
+                    p.dmin[0], p.dmin[1], p.dmin[2]
+                );
+                Some(p)
+            }
             Some("pro-image-100" | "proimage100" | "pro-image") => {
                 let p = RollProfile::pro_image_100();
                 println!("Roll profile: {} ({})", p.name, p.film_stock);

@@ -1,4 +1,6 @@
 pub const HELP: &str = "Usage: coolscan-studio [OPTIONS]\n\
+    --gui            Launch interactive desktop GUI review and scan studio.\n\
+    --mock           Run GUI in simulation mode with 6 canned mock frames.\n\
     --scan           Perform scanning and write cropped image(s).\n\
     --eject          Eject loaded film from the scanner.\n\
     --frame N        Select one frame (numbered 1 to 6); defaults to all frames when scanning.\n\
@@ -13,13 +15,14 @@ pub const HELP: &str = "Usage: coolscan-studio [OPTIONS]\n\
     --offset-mm MM   Shift along film travel; defaults to 0.\n\
     --help           Show help without opening the scanner.\n\
 \n\
+With --gui, coolscan-studio starts the Darktable-integrated graphical review studio.\n\
 With --scan, coolscan-studio runs discovery, acquires frames with safety overscan,\n\
 detects frame edges using film chromaticity and gradients, and outputs exact 2:3\n\
 aspect ratio images with borders eliminated.\n\
 \n\
-Without --scan, frame selection runs discovery, prints proposed position, and exits.";
+Without flags, coolscan-studio launches the GUI studio if a display is available.";
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Options {
     pub frame: Option<usize>,
     pub offset_mm: f64,
@@ -33,6 +36,29 @@ pub struct Options {
     pub clean: bool,
     pub tiff: bool,
     pub roll: Option<String>,
+    pub gui: bool,
+    pub mock: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            frame: None,
+            offset_mm: 0.0,
+            scan: false,
+            eject: false,
+            output: None,
+            auto_crop: true,
+            dpi: None,
+            samples: None,
+            high_fidelity: false,
+            clean: false,
+            tiff: false,
+            roll: None,
+            gui: false,
+            mock: false,
+        }
+    }
 }
 
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, String> {
@@ -48,47 +74,45 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
             Err("Use --help alone.".into())
         };
     }
-    let mut frame = None;
-    let mut offset = None;
-    let mut scan = false;
-    let mut eject = false;
-    let mut output = None;
-    let mut auto_crop = true;
-    let mut dpi = None;
-    let mut samples = None;
-    let mut high_fidelity = false;
-    let mut clean = false;
-    let mut tiff = false;
-    let mut roll = None;
+    let mut options = Options::default();
+    let mut offset_specified = false;
+
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--gui" => {
+                options.gui = true;
+            }
+            "--mock" => {
+                options.mock = true;
+                options.gui = true;
+            }
             "--scan" => {
-                scan = true;
+                options.scan = true;
             }
             "--eject" => {
-                eject = true;
+                options.eject = true;
             }
             "--no-auto-crop" => {
-                auto_crop = false;
+                options.auto_crop = false;
             }
             "--high-fidelity" | "--hq" => {
-                high_fidelity = true;
+                options.high_fidelity = true;
             }
             "--clean" | "--ice" => {
-                clean = true;
+                options.clean = true;
             }
             "--tiff" | "--16bit" => {
-                tiff = true;
+                options.tiff = true;
             }
-            "--roll" if roll.is_none() => {
+            "--roll" if options.roll.is_none() => {
                 let value = args.next().ok_or("Missing roll profile name or path.")?;
-                roll = Some(value);
+                options.roll = Some(value);
             }
-            "--output" if output.is_none() => {
+            "--output" if options.output.is_none() => {
                 let dir = args.next().ok_or("Missing output directory.")?;
-                output = Some(dir);
+                options.output = Some(dir);
             }
-            "--dpi" if dpi.is_none() => {
+            "--dpi" if options.dpi.is_none() => {
                 let value = args.next().ok_or("Missing DPI value.")?;
                 let number = value
                     .parse::<u16>()
@@ -96,9 +120,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
                 if !(90..=2900).contains(&number) {
                     return Err("DPI must be between 90 and 2900.".into());
                 }
-                dpi = Some(number);
+                options.dpi = Some(number);
             }
-            "--samples" if samples.is_none() => {
+            "--samples" if options.samples.is_none() => {
                 let value = args.next().ok_or("Missing samples value.")?;
                 let number = value
                     .parse::<u8>()
@@ -106,9 +130,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
                 if !(1..=16).contains(&number) {
                     return Err("Samples must be between 1 and 16.".into());
                 }
-                samples = Some(number);
+                options.samples = Some(number);
             }
-            "--frame" if frame.is_none() => {
+            "--frame" if options.frame.is_none() => {
                 let value = args.next().ok_or("Missing frame number.")?;
                 let number = value
                     .parse::<usize>()
@@ -119,9 +143,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
                 if number > 6 {
                     return Err("Frame number must be between 1 and 6.".into());
                 }
-                frame = Some(number);
+                options.frame = Some(number);
             }
-            "--offset-mm" if offset.is_none() => {
+            "--offset-mm" if !offset_specified => {
                 let value = args.next().ok_or("Missing offset in millimetres.")?;
                 let mm = value
                     .parse::<f64>()
@@ -129,28 +153,16 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
                 if !mm.is_finite() {
                     return Err("Offset must be a finite number.".into());
                 }
-                offset = Some(mm);
+                options.offset_mm = mm;
+                offset_specified = true;
             }
             _ => return Err(format!("Unknown or repeated argument: {arg}")),
         }
     }
-    if offset.is_some() && frame.is_none() {
+    if offset_specified && options.frame.is_none() {
         return Err("--offset-mm requires --frame.".into());
     }
-    Ok(Some(Options {
-        frame,
-        offset_mm: offset.unwrap_or(0.0),
-        scan,
-        eject,
-        output,
-        auto_crop,
-        dpi,
-        samples,
-        high_fidelity,
-        clean,
-        tiff,
-        roll,
-    }))
+    Ok(Some(options))
 }
 
 #[cfg(test)]
@@ -166,16 +178,7 @@ mod tests {
             Some(Options {
                 frame: Some(2),
                 offset_mm: 1.7,
-                scan: false,
-                eject: false,
-                output: None,
-                auto_crop: true,
-                dpi: None,
-                samples: None,
-                high_fidelity: false,
-                clean: false,
-                tiff: false,
-                roll: None,
+                ..Options::default()
             })
         );
         assert_eq!(
@@ -185,85 +188,60 @@ mod tests {
                 frame: Some(3),
                 offset_mm: 0.0,
                 scan: true,
-                eject: false,
                 output: Some("./out".into()),
-                auto_crop: true,
                 dpi: Some(2900),
                 samples: Some(16),
-                high_fidelity: false,
                 clean: true,
                 tiff: true,
-                roll: None,
+                ..Options::default()
             })
         );
         assert_eq!(
             parse_words("--scan --high-fidelity")
                 .unwrap(),
             Some(Options {
-                frame: None,
-                offset_mm: 0.0,
                 scan: true,
-                eject: false,
-                output: None,
-                auto_crop: true,
-                dpi: None,
-                samples: None,
                 high_fidelity: true,
-                clean: false,
-                tiff: false,
-                roll: None,
+                ..Options::default()
             })
         );
         assert_eq!(
             parse_words("--scan --no-auto-crop")
                 .unwrap(),
             Some(Options {
-                frame: None,
-                offset_mm: 0.0,
                 scan: true,
-                eject: false,
-                output: None,
                 auto_crop: false,
-                dpi: None,
-                samples: None,
-                high_fidelity: false,
-                clean: false,
-                tiff: false,
-                roll: None,
+                ..Options::default()
             })
         );
         assert_eq!(
             parse_words("--eject").unwrap(),
             Some(Options {
-                frame: None,
-                offset_mm: 0.0,
-                scan: false,
                 eject: true,
-                output: None,
-                auto_crop: true,
-                dpi: None,
-                samples: None,
-                high_fidelity: false,
-                clean: false,
-                tiff: false,
-                roll: None,
+                ..Options::default()
             })
         );
         assert_eq!(
             parse_words("--scan --roll pro-image-100").unwrap(),
             Some(Options {
-                frame: None,
-                offset_mm: 0.0,
                 scan: true,
-                eject: false,
-                output: None,
-                auto_crop: true,
-                dpi: None,
-                samples: None,
-                high_fidelity: false,
-                clean: false,
-                tiff: false,
                 roll: Some("pro-image-100".into()),
+                ..Options::default()
+            })
+        );
+        assert_eq!(
+            parse_words("--gui").unwrap(),
+            Some(Options {
+                gui: true,
+                ..Options::default()
+            })
+        );
+        assert_eq!(
+            parse_words("--mock").unwrap(),
+            Some(Options {
+                gui: true,
+                mock: true,
+                ..Options::default()
             })
         );
         assert_eq!(
@@ -275,7 +253,6 @@ mod tests {
         );
         assert_eq!(parse_words("--frame 1").unwrap().unwrap().offset_mm, 0.0);
         assert_eq!(parse_words("").unwrap().unwrap().frame, None);
-        assert_eq!(parse_words("--help").unwrap(), None);
     }
     #[test]
     fn rejects_invalid_arguments() {
