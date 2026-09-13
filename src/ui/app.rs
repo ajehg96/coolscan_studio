@@ -375,7 +375,7 @@ impl ReviewApp {
 
                 // Film profile
                 ui.horizontal(|ui| {
-                    ui.label("Film Profile:");
+                    ui.label("Film Stock:");
                     egui::ComboBox::from_id_salt("film_stock_combo")
                         .selected_text(match self.scan_setup.film_stock_index {
                             1 => "Kodak Portra 400",
@@ -399,6 +399,21 @@ impl ReviewApp {
                                 "Kodak Gold 200",
                             );
                         });
+                });
+
+                let (status_text, status_color) = match self.scan_setup.film_stock_index {
+                    0 => (
+                        "Measured roll profile loaded",
+                        Color32::from_rgb(120, 220, 120),
+                    ),
+                    _ => (
+                        "D-min calibration required",
+                        Color32::from_rgb(255, 180, 100),
+                    ),
+                };
+                ui.horizontal(|ui| {
+                    ui.label("Calibration:");
+                    ui.colored_label(status_color, status_text);
                 });
 
                 ui.add_space(8.0);
@@ -580,8 +595,19 @@ impl eframe::App for ReviewApp {
                 ui.label(format!("Roll: {}", self.session.roll.id));
                 ui.colored_label(
                     Color32::from_rgb(180, 220, 255),
-                    &self.session.roll.film_stock,
+                    &self.session.roll.film_stock.name,
                 );
+                if self.session.roll.is_calibrated() {
+                    ui.colored_label(
+                        Color32::from_rgb(120, 220, 120),
+                        "Measured roll profile loaded",
+                    );
+                } else {
+                    ui.colored_label(
+                        Color32::from_rgb(255, 180, 100),
+                        "D-min calibration required",
+                    );
+                }
 
                 // Scanner Worker Live Controls
                 if self.worker.is_some() {
@@ -764,13 +790,27 @@ impl eframe::App for ReviewApp {
                 ui.heading("Parameters");
                 ui.separator();
 
+                let roll_is_calibrated = self.session.roll.is_calibrated();
                 if let Some(frame) = self.session.current_frame_mut() {
                     ScrollArea::vertical().show(ui, |ui| {
                         ui.collapsing("Film Substrate (D-min)", |ui| {
-                            ui.label(format!(
-                                "R: {:.4}  G: {:.4}  B: {:.4}",
-                                frame.params.dmin[0], frame.params.dmin[1], frame.params.dmin[2]
-                            ));
+                            if roll_is_calibrated {
+                                ui.label(format!(
+                                    "R: {:.4}  G: {:.4}  B: {:.4}",
+                                    frame.params.dmin[0],
+                                    frame.params.dmin[1],
+                                    frame.params.dmin[2]
+                                ));
+                                ui.colored_label(
+                                    Color32::from_rgb(120, 220, 120),
+                                    "Measured roll profile loaded",
+                                );
+                            } else {
+                                ui.colored_label(
+                                    Color32::from_rgb(255, 180, 100),
+                                    "D-min calibration required",
+                                );
+                            }
                         });
 
                         ui.add_space(4.0);

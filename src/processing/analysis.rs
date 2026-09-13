@@ -11,7 +11,7 @@ use super::negadoctor::{
     NegadoctorParams, auto_dmax, auto_highlight_wb, auto_paper_black, auto_print_exposure,
     auto_scan_bias, auto_shadow_wb,
 };
-use super::roll::RollProfile;
+use super::roll::{RollProfile, RollProfileError};
 use nkscan::{protocol::decode::Samples, scan::pass::Pass};
 
 /// Axis-aligned pixel rectangle for regional sampling and analysis.
@@ -226,11 +226,15 @@ pub struct TechnicalAnalysis {
 
 /// Stage 1 analysis: Computes whole-frame technical parameters (D-max and scan exposure bias)
 /// from the cropped image area and roll substrate profile.
-pub fn analyse_pre_white_balance(image: &WorkingImage, roll: &RollProfile) -> TechnicalAnalysis {
+pub fn analyse_pre_white_balance(
+    image: &WorkingImage,
+    roll: &RollProfile,
+) -> Result<TechnicalAnalysis, RollProfileError> {
+    let dmin = roll.dmin().ok_or(RollProfileError::UncalibratedRoll)?;
     let stats = image.sample_region(None);
-    let dmax = auto_dmax(roll.dmin, stats.min);
-    let scan_bias = auto_scan_bias(roll.dmin, dmax, stats.max);
-    TechnicalAnalysis { dmax, scan_bias }
+    let dmax = auto_dmax(dmin, stats.min);
+    let scan_bias = auto_scan_bias(dmin, dmax, stats.max);
+    Ok(TechnicalAnalysis { dmax, scan_bias })
 }
 
 /// Samples a neutral highlight patch to derive illuminant white balance.
@@ -350,7 +354,7 @@ mod tests {
         let img = WorkingImage::new(2, 2, pixels);
 
         // Stage 1: Pre-WB Technical Analysis
-        let tech = analyse_pre_white_balance(&img, &roll);
+        let tech = analyse_pre_white_balance(&img, &roll).unwrap();
         assert!(
             (tech.dmax - 3.2718).abs() < 1e-3,
             "Expected D-max ~3.2718, got {}",
@@ -362,8 +366,15 @@ mod tests {
             tech.scan_bias
         );
 
+        // Verify uncalibrated roll is rejected
+        let uncalibrated = RollProfile::portra_400();
+        assert!(matches!(
+            analyse_pre_white_balance(&img, &uncalibrated),
+            Err(RollProfileError::UncalibratedRoll)
+        ));
+
         // Initialize NegadoctorParams with stage 1 results
-        let mut params = NegadoctorParams::from_dmin(roll.dmin);
+        let mut params = NegadoctorParams::from_dmin(roll.dmin().unwrap());
         params.dmax = tech.dmax;
         params.offset = tech.scan_bias;
 

@@ -192,7 +192,8 @@ impl MockScannerBackend {
             roll: Some(self.roll_profile.clone()),
         };
 
-        let mut params = NegadoctorParams::from_dmin(self.roll_profile.dmin);
+        let dmin = self.roll_profile.dmin().unwrap_or([0.8965, 0.9093, 0.8816]);
+        let mut params = NegadoctorParams::from_dmin(dmin);
         params.dmax = 3.20 + (frame_number as f32 * 0.05);
         params.offset = 0.08 + (frame_number as f32 * 0.01);
         params.paper_black = 0.10;

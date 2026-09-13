@@ -18,4 +18,7 @@ pub use negadoctor::{
     auto_shadow_wb, render_positive,
 };
 pub use orientation::{Orientation, OrientationScope};
-pub use roll::{PreparedFrame, RollId, RollProfile, RollProfileError, ScannerProfile};
+pub use roll::{
+    FilmStock, PreparedFrame, RollCalibration, RollId, RollProfile, RollProfileError,
+    ScannerProfile,
+};

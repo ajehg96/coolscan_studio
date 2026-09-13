@@ -94,7 +94,8 @@ impl ReviewFrameState {
         roll: &RollProfile,
         technical: TechnicalAnalysis,
     ) -> Self {
-        let mut params = NegadoctorParams::from_dmin(roll.dmin);
+        let dmin = roll.dmin().unwrap_or([1.0, 1.0, 1.0]);
+        let mut params = NegadoctorParams::from_dmin(dmin);
         params.dmax = technical.dmax;
         params.offset = technical.scan_bias;
         finish_after_white_balance(&working_image, &mut params);
@@ -504,9 +505,13 @@ impl ReviewSession {
 
     /// Generates the Darktable XMP sidecar for the current frame.
     pub fn current_darktable_xmp(&self) -> Option<DarktableXmp> {
+        if !self.roll.is_calibrated() {
+            return None;
+        }
         let frame = self.current_frame()?;
         let derived_from = format!("frame-{}.tif", frame.frame_number);
-        let profile_name = self.roll.scanner_profile.icc_profile_name();
+        let scanner_profile = self.roll.scanner_profile();
+        let profile_name = scanner_profile.icc_profile_name();
         DarktableXmp::for_frame(
             &derived_from,
             profile_name,
@@ -525,7 +530,10 @@ impl ReviewSession {
             .current_frame()
             .ok_or_else(|| DarktableError::MissingHistoryItem("No active frame".into()))?;
         let xmp = self.current_darktable_xmp().ok_or_else(|| {
-            DarktableError::MissingHistoryItem("Could not generate XMP for frame".into())
+            DarktableError::MissingHistoryItem(format!(
+                "Could not generate XMP for frame: roll '{}' is uncalibrated or frame missing",
+                self.roll.id
+            ))
         })?;
         let path = output_dir.join(format!("frame-{}.tif.xmp", frame.frame_number));
         xmp.write_to_file(&path)?;

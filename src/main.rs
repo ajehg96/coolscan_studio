@@ -187,41 +187,37 @@ fn main() {
             None => FrameSelection::All,
         };
 
+        let print_roll_info = |p: &RollProfile| {
+            println!("Roll profile: {} ({})", p.name, p.film_stock);
+            if let Some(dmin) = p.dmin() {
+                println!(
+                    "  Calibration: Measured roll profile loaded (D-min: R={:.4}, G={:.4}, B={:.4})",
+                    dmin[0], dmin[1], dmin[2]
+                );
+            } else {
+                println!("  Calibration: D-min calibration required");
+            }
+        };
+
         let roll_profile = match options.roll.as_deref() {
             Some("portra-400" | "portra400" | "portra") => {
                 let p = RollProfile::portra_400();
-                println!("Roll profile: {} ({})", p.name, p.film_stock);
-                println!(
-                    "  D-min: R={:.4}, G={:.4}, B={:.4}",
-                    p.dmin[0], p.dmin[1], p.dmin[2]
-                );
+                print_roll_info(&p);
                 Some(p)
             }
             Some("gold-200" | "gold200" | "gold") => {
                 let p = RollProfile::gold_200();
-                println!("Roll profile: {} ({})", p.name, p.film_stock);
-                println!(
-                    "  D-min: R={:.4}, G={:.4}, B={:.4}",
-                    p.dmin[0], p.dmin[1], p.dmin[2]
-                );
+                print_roll_info(&p);
                 Some(p)
             }
             Some("pro-image-100" | "proimage100" | "pro-image") => {
                 let p = RollProfile::pro_image_100();
-                println!("Roll profile: {} ({})", p.name, p.film_stock);
-                println!(
-                    "  D-min: R={:.4}, G={:.4}, B={:.4}",
-                    p.dmin[0], p.dmin[1], p.dmin[2]
-                );
+                print_roll_info(&p);
                 Some(p)
             }
             Some(path) => match RollProfile::load_from_file(Path::new(path)) {
                 Ok(p) => {
-                    println!("Roll profile: {} ({})", p.name, p.film_stock);
-                    println!(
-                        "  D-min: R={:.4}, G={:.4}, B={:.4}",
-                        p.dmin[0], p.dmin[1], p.dmin[2]
-                    );
+                    print_roll_info(&p);
                     Some(p)
                 }
                 Err(e) => {

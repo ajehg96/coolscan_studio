@@ -26,6 +26,7 @@ pub enum ColorError {
     Io(std::io::Error),
     InvalidChannelCount(usize),
     IncompletePlane { expected: usize, found: usize },
+    UncalibratedRoll(String),
 }
 
 impl std::fmt::Display for ColorError {
@@ -45,6 +46,7 @@ impl std::fmt::Display for ColorError {
                     "Incomplete color plane: expected at least {expected} samples, found {found}"
                 )
             }
+            ColorError::UncalibratedRoll(msg) => write!(f, "Uncalibrated roll: {msg}"),
         }
     }
 }
