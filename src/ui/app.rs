@@ -235,18 +235,15 @@ impl ReviewApp {
         let frames = if self.scan_setup.all_frames {
             FrameSelection::All
         } else {
-            let list: Vec<usize> = self
+            let list = self
                 .scan_setup
                 .frame_selected
                 .iter()
                 .enumerate()
-                .filter_map(|(i, &sel)| if sel { Some(i + 1) } else { None })
+                .filter_map(|(i, &selected)| selected.then_some(i + 1))
                 .collect();
-            if list.is_empty() {
-                FrameSelection::All
-            } else {
-                FrameSelection::List(list)
-            }
+
+            FrameSelection::List(list)
         };
 
         let samples = match self.scan_setup.quality {
@@ -1168,4 +1165,43 @@ pub fn run_gui(app: ReviewApp) -> eframe::Result<()> {
 /// Launches the desktop GUI review window for a pre-loaded session.
 pub fn run_review_gui(session: ReviewSession) -> eframe::Result<()> {
     run_gui(ReviewApp::new(session))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::processing::color::ScannerColorPipeline;
+    use crate::scanner::types::ScanRequestError;
+
+    fn test_app() -> ReviewApp {
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let session = ReviewSession::empty(RollProfile::pro_image_100(), pipeline);
+        ReviewApp::new(session)
+    }
+
+    #[test]
+    fn test_empty_manual_frame_selection_does_not_dispatch_scan() {
+        let mut app = test_app();
+        app.scan_setup.all_frames = false;
+        app.scan_setup.frame_selected = [false; 6];
+
+        let req = app.build_scan_request();
+        assert_eq!(req.frames, FrameSelection::List(vec![]));
+        assert_eq!(req.validate(), Err(ScanRequestError::EmptyFrameList));
+
+        app.start_scan();
+        assert!(!app.is_scanning);
+        assert!(app.status_message.contains("Invalid scan settings"));
+    }
+
+    #[test]
+    fn test_manual_frame_selection_sparse_preserves_frames() {
+        let mut app = test_app();
+        app.scan_setup.all_frames = false;
+        app.scan_setup.frame_selected = [false, true, false, true, false, true];
+
+        let req = app.build_scan_request();
+        assert_eq!(req.frames, FrameSelection::List(vec![2, 4, 6]));
+        assert_eq!(req.validate(), Ok(()));
+    }
 }

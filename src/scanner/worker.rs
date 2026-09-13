@@ -267,6 +267,13 @@ impl ScannerBackend for MockScannerBackend {
         emit: &mut dyn FnMut(WorkerMessage),
     ) {
         let frame_numbers = request.frames.resolve(self.frame_count);
+        if frame_numbers.is_empty() {
+            emit(WorkerMessage::Error(format!(
+                "Scan failed: {}",
+                crate::scanner::types::ScanError::AllFramesFailed
+            )));
+            return;
+        }
 
         for &frame_num in &frame_numbers {
             if cancel_current.load(Ordering::Relaxed) {
@@ -791,5 +798,31 @@ mod tests {
         }
 
         assert!(ejected, "Film should have ejected");
+    }
+
+    #[test]
+    fn mock_backend_zero_discovered_frames_fails() {
+        let handle = ScannerWorkerHandle::spawn(MockScannerBackend::new(0, Duration::ZERO));
+
+        let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
+        handle.send(ScanCommand::StartScan(Box::new(req)));
+
+        let mut error_received = false;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            if matches!(
+                handle.try_recv(),
+                Some(WorkerMessage::Error(err)) if err.contains("All requested frames failed to scan")
+            ) {
+                error_received = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(
+            error_received,
+            "Expected AllFramesFailed error message when zero frames are discovered"
+        );
     }
 }
