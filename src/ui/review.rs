@@ -57,8 +57,10 @@ impl std::fmt::Display for SelectionStatus {
 pub struct ReviewFrameState {
     /// 1-based frame number on the strip.
     pub frame_number: usize,
-    /// Working image in linear Rec.2020 space.
+    /// Full-resolution master working image in linear Rec.2020 space.
     pub working_image: WorkingImage,
+    /// Downscaled working preview image for fast interactive rendering.
+    pub preview_image: WorkingImage,
     /// Current view orientation.
     pub orientation: Orientation,
     /// Active Negadoctor parameters.
@@ -73,7 +75,9 @@ pub struct ReviewFrameState {
     pub accepted: bool,
     /// Original scanner frame artifact if retained.
     pub source_artifact: Option<crate::scanner::types::FrameArtifact>,
-    /// Cached display sRGB RGBA8 pixels and preview dimensions.
+    /// Cached unoriented display sRGB pixels of the preview image.
+    cached_srgb: Option<Vec<[u8; 3]>>,
+    /// Cached oriented display sRGB RGBA8 pixels and preview dimensions.
     cached_preview: Option<(usize, usize, Vec<u8>)>,
 }
 
@@ -90,9 +94,12 @@ impl ReviewFrameState {
         params.offset = technical.scan_bias;
         finish_after_white_balance(&working_image, &mut params);
 
+        let preview_image = working_image.downscale_to_preview(1440);
+
         Self {
             frame_number,
             working_image,
+            preview_image,
             orientation: Orientation::Normal,
             params,
             technical,
@@ -100,6 +107,7 @@ impl ReviewFrameState {
             selection_status: SelectionStatus::None,
             accepted: false,
             source_artifact: None,
+            cached_srgb: None,
             cached_preview: None,
         }
     }
@@ -109,12 +117,12 @@ impl ReviewFrameState {
         self
     }
 
-    /// Sets the orientation and invalidates the cached preview.
+    /// Sets the orientation and invalidates the cached oriented preview (preserving unoriented sRGB).
     pub fn set_orientation(&mut self, orientation: Orientation) {
         if self.orientation != orientation {
             self.orientation = orientation;
             self.highlight_wb_rect = None;
-            self.invalidate_preview();
+            self.cached_preview = None;
         }
     }
 
@@ -128,12 +136,31 @@ impl ReviewFrameState {
             return;
         }
 
-        // Map preview rectangle to underlying source sensor coordinates
-        let source_rect = self.orientation.preview_rect_to_source_rect(
+        // Map preview rectangle to preview sensor coordinates
+        let preview_source = self.orientation.preview_rect_to_source_rect(
             preview_rect,
-            self.working_image.width,
-            self.working_image.height,
+            self.preview_image.width,
+            self.preview_image.height,
         );
+
+        // Map to master sensor coordinates for full precision sampling
+        let source_rect = if self.working_image.width == self.preview_image.width
+            && self.working_image.height == self.preview_image.height
+        {
+            preview_source
+        } else {
+            let scale_x = self.working_image.width as f64 / self.preview_image.width as f64;
+            let scale_y = self.working_image.height as f64 / self.preview_image.height as f64;
+            let mx = (preview_source.x as f64 * scale_x).round() as usize;
+            let my = (preview_source.y as f64 * scale_y).round() as usize;
+            let mw = ((preview_source.width as f64 * scale_x).round() as usize)
+                .max(1)
+                .min(self.working_image.width.saturating_sub(mx));
+            let mh = ((preview_source.height as f64 * scale_y).round() as usize)
+                .max(1)
+                .min(self.working_image.height.saturating_sub(my));
+            SampleRect::new(mx, my, mw, mh)
+        };
 
         let stats = self.working_image.sample_region(Some(source_rect));
 
@@ -147,7 +174,6 @@ impl ReviewFrameState {
         }
 
         // 2. Check if selected area is in positive shadows (near D-min in negative transmission)
-        // A highlight must have density at least ~0.15 above substrate
         let is_too_dark = stats.mean[0] > self.params.dmin[0] * 0.90
             && stats.mean[1] > self.params.dmin[1] * 0.90
             && stats.mean[2] > self.params.dmin[2] * 0.90;
@@ -157,7 +183,7 @@ impl ReviewFrameState {
             return;
         }
 
-        // 3. Valid selection: calculate highlight WB and update paper black & print exposure
+        // 3. Valid selection: calculate highlight WB and update paper black & print exposure on full-res master
         let wb_high = sample_highlight_wb(&self.working_image, &self.params, Some(source_rect));
         self.params.wb_high = wb_high;
 
@@ -180,6 +206,7 @@ impl ReviewFrameState {
     /// Invalidates cached preview pixels so the texture will be regenerated.
     pub fn invalidate_preview(&mut self) {
         self.cached_preview = None;
+        self.cached_srgb = None;
     }
 
     /// Retrieves or computes display sRGB RGBA8 preview pixels.
@@ -188,13 +215,43 @@ impl ReviewFrameState {
         color_pipeline: &ScannerColorPipeline,
     ) -> (usize, usize, &[u8]) {
         if self.cached_preview.is_none() {
-            let rendered = generate_preview_rgba(
-                &self.working_image,
-                &self.params,
-                self.orientation,
-                color_pipeline,
-            );
-            self.cached_preview = Some(rendered);
+            // Step 1 & 2: Ensure unoriented sRGB pixels of the preview image are available
+            if self.cached_srgb.is_none() {
+                let prepared = self.params.prepare();
+                let mut positive_linear = vec![[0.0f32; 3]; self.preview_image.pixels.len()];
+                prepared.render_positive(&self.preview_image.pixels, &mut positive_linear);
+
+                let mut srgb = vec![[0u8; 3]; self.preview_image.pixels.len()];
+                color_pipeline.bulk_working_to_display_srgb(&positive_linear, &mut srgb);
+                self.cached_srgb = Some(srgb);
+            }
+
+            let srgb = self.cached_srgb.as_ref().unwrap();
+            let (pw, ph) = self
+                .orientation
+                .preview_dimensions(self.preview_image.width, self.preview_image.height);
+
+            // Step 3: Transpose into oriented RGBA8 output
+            let mut rgba = vec![255u8; pw * ph * 4];
+            for v in 0..ph {
+                let row_offset = v * pw;
+                for u in 0..pw {
+                    let (sx, sy) = self.orientation.preview_to_source(
+                        u,
+                        v,
+                        self.preview_image.width,
+                        self.preview_image.height,
+                    );
+                    let px = srgb[sy * self.preview_image.width + sx];
+                    let idx = (row_offset + u) * 4;
+                    rgba[idx] = px[0];
+                    rgba[idx + 1] = px[1];
+                    rgba[idx + 2] = px[2];
+                    rgba[idx + 3] = 255;
+                }
+            }
+
+            self.cached_preview = Some((pw, ph, rgba));
         }
         let (w, h, pixels) = self.cached_preview.as_ref().unwrap();
         (*w, *h, pixels.as_slice())

@@ -162,6 +162,57 @@ impl WorkingImage {
             count,
         }
     }
+
+    /// Creates a downscaled working preview buffer using box-filter area averaging.
+    ///
+    /// If both dimensions are already within `max_dimension`, returns a clone.
+    pub fn downscale_to_preview(&self, max_dimension: usize) -> Self {
+        let max_dim = self.width.max(self.height);
+        if max_dim <= max_dimension || max_dimension == 0 {
+            return self.clone();
+        }
+
+        let scale = ((max_dim as f64 / max_dimension as f64).ceil() as usize).max(1);
+        let new_w = (self.width + scale - 1) / scale;
+        let new_h = (self.height + scale - 1) / scale;
+        let mut downscaled_pixels = Vec::with_capacity(new_w * new_h);
+
+        for by in 0..new_h {
+            let y_start = by * scale;
+            let y_end = (y_start + scale).min(self.height);
+            for bx in 0..new_w {
+                let x_start = bx * scale;
+                let x_end = (x_start + scale).min(self.width);
+
+                let mut sum = [0.0f32; 3];
+                let mut count = 0usize;
+
+                for y in y_start..y_end {
+                    let row_offset = y * self.width;
+                    for x in x_start..x_end {
+                        let px = self.pixels[row_offset + x];
+                        sum[0] += px[0];
+                        sum[1] += px[1];
+                        sum[2] += px[2];
+                        count += 1;
+                    }
+                }
+
+                if count > 0 {
+                    let inv = 1.0 / count as f32;
+                    downscaled_pixels.push([sum[0] * inv, sum[1] * inv, sum[2] * inv]);
+                } else {
+                    downscaled_pixels.push([0.0, 0.0, 0.0]);
+                }
+            }
+        }
+
+        Self {
+            width: new_w,
+            height: new_h,
+            pixels: downscaled_pixels,
+        }
+    }
 }
 
 /// Technical analysis results computed prior to white-balance calibration.
@@ -337,5 +388,42 @@ mod tests {
             "Expected print exposure ~0.8844, got {}",
             params.print_exposure
         );
+    }
+
+    #[test]
+    fn downscale_to_preview_preserves_area_averages() {
+        // 4x4 image with known block values
+        let mut pixels = Vec::with_capacity(16);
+        for y in 0..4 {
+            for x in 0..4 {
+                let v = if x < 2 && y < 2 {
+                    0.2f32
+                } else if x >= 2 && y < 2 {
+                    0.4f32
+                } else if x < 2 && y >= 2 {
+                    0.6f32
+                } else {
+                    0.8f32
+                };
+                pixels.push([v, v, v]);
+            }
+        }
+        let img = WorkingImage::new(4, 4, pixels);
+
+        // Downscale with max_dimension 2 (scale factor 2 -> 2x2 output)
+        let preview = img.downscale_to_preview(2);
+        assert_eq!(preview.width, 2);
+        assert_eq!(preview.height, 2);
+
+        assert!((preview.pixel(0, 0).unwrap()[0] - 0.2).abs() < 1e-5);
+        assert!((preview.pixel(1, 0).unwrap()[0] - 0.4).abs() < 1e-5);
+        assert!((preview.pixel(0, 1).unwrap()[0] - 0.6).abs() < 1e-5);
+        assert!((preview.pixel(1, 1).unwrap()[0] - 0.8).abs() < 1e-5);
+
+        // Downscale with max_dimension >= 4 returns unchanged clone
+        let no_change = img.downscale_to_preview(4);
+        assert_eq!(no_change.width, 4);
+        assert_eq!(no_change.height, 4);
+        assert_eq!(no_change.pixels, img.pixels);
     }
 }
