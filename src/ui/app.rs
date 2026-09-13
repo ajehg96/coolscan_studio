@@ -284,7 +284,7 @@ impl ReviewApp {
             self.session.roll = roll.clone();
         }
         if let Some(worker) = &self.worker {
-            worker.send(ScanCommand::StartScan(req));
+            worker.send(ScanCommand::StartScan(Box::new(req)));
             self.is_scanning = true;
             self.status_message = "Starting scan...".into();
             self.scan_setup.show_setup_modal = false;

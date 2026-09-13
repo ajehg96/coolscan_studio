@@ -34,7 +34,7 @@ fn phase11_end_to_end_mock_canned_strip_review_and_darktable_export() {
     app.worker
         .as_ref()
         .unwrap()
-        .send(ScanCommand::StartScan(req));
+        .send(ScanCommand::StartScan(Box::new(req)));
 
     // 3. Simulate UI event loop polling until all 6 frames are acquired and scan completes
     let start = Instant::now();

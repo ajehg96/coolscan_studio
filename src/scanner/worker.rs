@@ -36,7 +36,7 @@ pub enum ScanCommand {
     /// Run strip discovery to locate frame boundaries.
     DiscoverStrip,
     /// Begin scanning frames according to the specified request.
-    StartScan(ScanRequest),
+    StartScan(Box<ScanRequest>),
     /// Abort the currently scanning frame immediately.
     CancelCurrentFrame,
     /// Finish the current frame, then stop without starting subsequent frames.
@@ -675,7 +675,7 @@ mod tests {
         handle.send(ScanCommand::DiscoverStrip);
 
         let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
-        handle.send(ScanCommand::StartScan(req));
+        handle.send(ScanCommand::StartScan(Box::new(req)));
 
         let mut frames_received = 0;
         let mut discovery_done = false;
@@ -716,7 +716,7 @@ mod tests {
             ScannerWorkerHandle::spawn(MockScannerBackend::new(6, Duration::from_millis(50)));
 
         let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
-        handle.send(ScanCommand::StartScan(req));
+        handle.send(ScanCommand::StartScan(Box::new(req)));
 
         // Let it start, then cancel immediately
         std::thread::sleep(Duration::from_millis(15));
@@ -741,7 +741,7 @@ mod tests {
             ScannerWorkerHandle::spawn(MockScannerBackend::new(6, Duration::from_millis(60)));
 
         let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
-        handle.send(ScanCommand::StartScan(req));
+        handle.send(ScanCommand::StartScan(Box::new(req)));
 
         // Let frame 1 start, then request stop after current
         std::thread::sleep(Duration::from_millis(15));
