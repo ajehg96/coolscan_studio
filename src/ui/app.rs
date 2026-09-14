@@ -896,6 +896,15 @@ impl eframe::App for ReviewApp {
                                 .add(Slider::new(&mut frame.params.dmax, 0.5..=5.0).step_by(0.01))
                                 .changed()
                             {
+                                frame.modes.dmax_auto = false;
+                                frame.recalculate_downstream();
+                                params_changed = true;
+                            }
+                            if !frame.modes.dmax_auto
+                                && ui.button("⟲").on_hover_text("Reset to Auto").clicked()
+                            {
+                                frame.modes.dmax_auto = true;
+                                frame.recalculate_downstream();
                                 params_changed = true;
                             }
                         });
@@ -908,12 +917,30 @@ impl eframe::App for ReviewApp {
                                 )
                                 .changed()
                             {
+                                frame.modes.offset_auto = false;
+                                frame.recalculate_downstream();
+                                params_changed = true;
+                            }
+                            if !frame.modes.offset_auto
+                                && ui.button("⟲").on_hover_text("Reset to Auto").clicked()
+                            {
+                                frame.modes.offset_auto = true;
+                                frame.recalculate_downstream();
                                 params_changed = true;
                             }
                         });
 
                         ui.add_space(4.0);
-                        ui.label(RichText::new("White Balance (Illuminant)").strong());
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("White Balance (Illuminant)").strong());
+                            if frame.modes.wb_high_mode
+                                != crate::ui::review::WhiteBalanceMode::Neutral
+                                && ui.button("⟲").on_hover_text("Reset to Neutral").clicked()
+                            {
+                                frame.reset_highlight_wb();
+                                params_changed = true;
+                            }
+                        });
                         ui.horizontal(|ui| {
                             ui.label("R:");
                             if ui
@@ -923,6 +950,9 @@ impl eframe::App for ReviewApp {
                                 )
                                 .changed()
                             {
+                                frame.modes.wb_high_mode =
+                                    crate::ui::review::WhiteBalanceMode::Manual;
+                                frame.recalculate_downstream();
                                 params_changed = true;
                             }
                         });
@@ -935,6 +965,9 @@ impl eframe::App for ReviewApp {
                                 )
                                 .changed()
                             {
+                                frame.modes.wb_high_mode =
+                                    crate::ui::review::WhiteBalanceMode::Manual;
+                                frame.recalculate_downstream();
                                 params_changed = true;
                             }
                         });
@@ -947,6 +980,9 @@ impl eframe::App for ReviewApp {
                                 )
                                 .changed()
                             {
+                                frame.modes.wb_high_mode =
+                                    crate::ui::review::WhiteBalanceMode::Manual;
+                                frame.recalculate_downstream();
                                 params_changed = true;
                             }
                         });
@@ -962,6 +998,15 @@ impl eframe::App for ReviewApp {
                                 )
                                 .changed()
                             {
+                                frame.modes.paper_black_auto = false;
+                                frame.recalculate_downstream();
+                                params_changed = true;
+                            }
+                            if !frame.modes.paper_black_auto
+                                && ui.button("⟲").on_hover_text("Reset to Auto").clicked()
+                            {
+                                frame.modes.paper_black_auto = true;
+                                frame.recalculate_downstream();
                                 params_changed = true;
                             }
                         });
@@ -1001,6 +1046,15 @@ impl eframe::App for ReviewApp {
                                 )
                                 .changed()
                             {
+                                frame.modes.print_exposure_auto = false;
+                                frame.recalculate_downstream();
+                                params_changed = true;
+                            }
+                            if !frame.modes.print_exposure_auto
+                                && ui.button("⟲").on_hover_text("Reset to Auto").clicked()
+                            {
+                                frame.modes.print_exposure_auto = true;
+                                frame.recalculate_downstream();
                                 params_changed = true;
                             }
                         });

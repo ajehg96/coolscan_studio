@@ -124,3 +124,166 @@ fn phase13_highlight_wb_selection_preserves_master_precision() {
     assert_eq!(ph, 500);
     assert_eq!(raw.len(), pw * ph * 4);
 }
+
+#[test]
+fn phase13_dependency_model_recalculation_chain() {
+    use coolscan_studio::ui::review::WhiteBalanceMode;
+    let roll = RollProfile::pro_image_100();
+
+    // Create an image with known stats so recalculation is deterministic
+    let master_w = 100;
+    let master_h = 100;
+    let mut pixels = Vec::with_capacity(master_w * master_h);
+    for _ in 0..(master_w * master_h) {
+        pixels.push([0.5, 0.5, 0.5]); // mean = 0.5, min = 0.5, max = 0.5
+    }
+    let working_image = WorkingImage::new(master_w, master_h, pixels);
+
+    let technical = TechnicalAnalysis {
+        dmax: 3.27,
+        scan_bias: 0.10,
+    };
+
+    let mut frame = ReviewFrameState::new(1, working_image.clone(), &roll, technical).unwrap();
+
+    // Initial auto values
+    let initial_offset = frame.params.offset;
+    let initial_paper_black = frame.params.paper_black;
+    let initial_print_exposure = frame.params.print_exposure;
+
+    // 1. D-max change -> recompute auto scan bias, paper black, print exposure
+    frame.modes.dmax_auto = false;
+    frame.params.dmax = 2.0;
+    frame.recalculate_downstream();
+
+    assert_ne!(
+        frame.params.offset, initial_offset,
+        "Offset should recalculate when D-max changes"
+    );
+    assert_ne!(
+        frame.params.paper_black, initial_paper_black,
+        "Paper black should recalculate"
+    );
+    assert_ne!(
+        frame.params.print_exposure, initial_print_exposure,
+        "Print exposure should recalculate"
+    );
+
+    // 2. Manual downstream values remain unchanged
+    frame.modes.offset_auto = false;
+    frame.params.offset = 0.25;
+    let saved_offset = frame.params.offset;
+
+    frame.modes.paper_black_auto = false;
+    frame.params.paper_black = 0.55;
+    let saved_paper_black = frame.params.paper_black;
+
+    // Now change D-max again. Auto downstreams would change, but these are manual
+    frame.params.dmax = 2.5;
+    frame.recalculate_downstream();
+
+    assert_eq!(
+        frame.params.offset, saved_offset,
+        "Manual offset should not be overwritten"
+    );
+    assert_eq!(
+        frame.params.paper_black, saved_paper_black,
+        "Manual paper black should not be overwritten"
+    );
+    assert_ne!(
+        frame.params.print_exposure, initial_print_exposure,
+        "Auto print exposure should still change"
+    );
+
+    // 3. Reset-to-auto recalculates correctly
+    frame.modes.offset_auto = true;
+    frame.modes.paper_black_auto = true;
+    frame.recalculate_downstream();
+
+    assert_ne!(
+        frame.params.offset, saved_offset,
+        "Offset should snap back to auto"
+    );
+    assert_ne!(
+        frame.params.paper_black, saved_paper_black,
+        "Paper black should snap back to auto"
+    );
+
+    // 4. Sampled WB -> recompute paper black
+    let pre_wb_paper_black = frame.params.paper_black;
+    frame.modes.wb_high_mode = WhiteBalanceMode::SampledAuto(SampleRect::new(0, 0, 10, 10));
+    // simulate picker setting a new wb_high value, though recalculate_downstream will re-run the sampler
+    frame.recalculate_downstream();
+
+    // sample_highlight_wb will calculate a new wb_high.
+    assert_ne!(
+        frame.params.wb_high,
+        [1.0, 1.0, 1.0],
+        "Sampled WB should not be neutral"
+    );
+    assert_ne!(
+        frame.params.paper_black, pre_wb_paper_black,
+        "Paper black should recalculate after WB change"
+    );
+
+    // 5. Reset WB to neutral
+    frame.modes.wb_high_mode = WhiteBalanceMode::Neutral;
+    frame.recalculate_downstream();
+    assert_eq!(frame.params.wb_high, [1.0, 1.0, 1.0]);
+}
+
+#[test]
+fn phase13_mock_mode_non_zero_real_image_stats() {
+    use coolscan_studio::scanner::types::{FrameSelection, ScanEvent, ScanRequest};
+    use coolscan_studio::scanner::worker::{ScanCommand, ScannerWorkerHandle};
+    use coolscan_studio::ui::ReviewSession;
+
+    let roll = RollProfile::pro_image_100();
+    let handle = ScannerWorkerHandle::spawn_mock(1);
+    handle.send(ScanCommand::CheckMedia);
+    handle.send(ScanCommand::DiscoverStrip);
+
+    let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
+    handle.send(ScanCommand::StartScan(Box::new(req)));
+
+    let mut prepared_frame = None;
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(5) {
+        if let Some(msg) = handle.try_recv() {
+            if let WorkerMessage::FrameReady(p) = msg {
+                prepared_frame = Some(*p);
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let prepared_frame = prepared_frame.expect("Mock backend should yield a FramePrepared event");
+
+    let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+    let mut session = ReviewSession::from_prepared_frames(vec![prepared_frame], pipeline).unwrap();
+    let frame = session.current_frame_mut().unwrap();
+
+    // The image stats MUST be populated from the actual working image, NOT zero.
+    assert!(
+        frame.image_stats.max[0] > 0.0,
+        "Real image stats must not be zero"
+    );
+    assert!(
+        frame.image_stats.max[1] > 0.0,
+        "Real image stats must not be zero"
+    );
+    assert!(
+        frame.image_stats.max[2] > 0.0,
+        "Real image stats must not be zero"
+    );
+
+    let initial_dmax = frame.params.dmax;
+    frame.modes.dmax_auto = true; // force recalculation
+    frame.recalculate_downstream();
+
+    assert!(
+        (frame.params.dmax - initial_dmax).abs() < 2.0,
+        "Dmax jumped wildly, likely due to zero stats"
+    );
+}

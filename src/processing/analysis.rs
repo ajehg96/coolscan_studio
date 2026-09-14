@@ -37,7 +37,7 @@ impl SampleRect {
 /// Statistics extracted from an image or region.
 ///
 /// Matches Darktable's color picker statistics (`picked_color_min`, `picked_color_max`, `picked_color`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ImageSampleStats {
     /// Minimum value per channel across the sample.
     pub min: [f32; 3],

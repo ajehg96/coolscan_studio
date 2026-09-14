@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::darktable::xmp::{DarktableError, DarktableXmp};
 use crate::processing::analysis::{
-    SampleRect, TechnicalAnalysis, WorkingImage, finish_after_white_balance, sample_highlight_wb,
+    ImageSampleStats, SampleRect, TechnicalAnalysis, WorkingImage, finish_after_white_balance,
+    sample_highlight_wb,
 };
 use crate::processing::color::{ColorError, ScannerColorPipeline};
 use crate::processing::negadoctor::{NegadoctorParams, THRESHOLD};
@@ -57,6 +58,36 @@ impl std::fmt::Display for SelectionStatus {
     }
 }
 
+/// Mode tracking for advanced Negadoctor parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WhiteBalanceMode {
+    #[default]
+    Neutral,
+    SampledAuto(SampleRect),
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NegadoctorModes {
+    pub dmax_auto: bool,
+    pub offset_auto: bool,
+    pub wb_high_mode: WhiteBalanceMode,
+    pub paper_black_auto: bool,
+    pub print_exposure_auto: bool,
+}
+
+impl Default for NegadoctorModes {
+    fn default() -> Self {
+        Self {
+            dmax_auto: true,
+            offset_auto: true,
+            wb_high_mode: WhiteBalanceMode::Neutral,
+            paper_black_auto: true,
+            print_exposure_auto: true,
+        }
+    }
+}
+
 /// Review state for an individual film frame.
 #[derive(Debug, Clone)]
 pub struct ReviewFrameState {
@@ -70,7 +101,11 @@ pub struct ReviewFrameState {
     pub orientation: Orientation,
     /// Active Negadoctor parameters.
     pub params: NegadoctorParams,
+    /// Which Negadoctor parameters are automatically managed vs manually overridden.
+    pub modes: NegadoctorModes,
     /// Technical analysis calculated before white balance.
+    /// Whole-frame image sample statistics.
+    pub image_stats: ImageSampleStats,
     pub technical: TechnicalAnalysis,
     /// Highlight white-balance selection rectangle in preview coordinates.
     pub highlight_wb_rect: Option<SampleRect>,
@@ -104,12 +139,16 @@ impl ReviewFrameState {
 
         let preview_image = working_image.downscale_to_preview(1440);
 
+        let image_stats = working_image.sample_region(None);
+
         Ok(Self {
             frame_number,
             working_image,
             preview_image,
             orientation: Orientation::Normal,
             params,
+            modes: NegadoctorModes::default(),
+            image_stats,
             technical,
             highlight_wb_rect: None,
             selection_status: SelectionStatus::None,
@@ -194,8 +233,8 @@ impl ReviewFrameState {
         // 3. Valid selection: calculate highlight WB and update paper black & print exposure on full-res master
         let wb_high = sample_highlight_wb(&self.working_image, &self.params, Some(source_rect));
         self.params.wb_high = wb_high;
-
-        finish_after_white_balance(&self.working_image, &mut self.params);
+        self.modes.wb_high_mode = WhiteBalanceMode::SampledAuto(source_rect);
+        self.recalculate_downstream();
 
         self.highlight_wb_rect = Some(preview_rect);
         self.selection_status = SelectionStatus::Valid;
@@ -205,10 +244,64 @@ impl ReviewFrameState {
     /// Resets highlight white balance back to neutral 1.0.
     pub fn reset_highlight_wb(&mut self) {
         self.params.wb_high = [1.0, 1.0, 1.0];
-        finish_after_white_balance(&self.working_image, &mut self.params);
+        self.modes.wb_high_mode = WhiteBalanceMode::Neutral;
+        self.recalculate_downstream();
         self.highlight_wb_rect = None;
         self.selection_status = SelectionStatus::None;
         self.invalidate_preview();
+    }
+
+    /// Recalculates downstream parameters that are in 'Auto' mode based on the current upstream parameters.
+    pub fn recalculate_downstream(&mut self) {
+        use crate::processing::analysis::sample_highlight_wb;
+        use crate::processing::negadoctor::{
+            auto_dmax, auto_paper_black, auto_print_exposure, auto_scan_bias,
+        };
+
+        let stats = &self.image_stats;
+        let dmin = self.params.dmin;
+
+        if self.modes.dmax_auto {
+            self.params.dmax = auto_dmax(dmin, stats.min);
+        }
+
+        if self.modes.offset_auto {
+            self.params.offset = auto_scan_bias(dmin, self.params.dmax, stats.max);
+        }
+
+        match self.modes.wb_high_mode {
+            WhiteBalanceMode::Neutral => {
+                self.params.wb_high = [1.0, 1.0, 1.0];
+            }
+            WhiteBalanceMode::SampledAuto(rect) => {
+                self.params.wb_high =
+                    sample_highlight_wb(&self.working_image, &self.params, Some(rect));
+            }
+            WhiteBalanceMode::Manual => {}
+        }
+
+        if self.modes.paper_black_auto {
+            self.params.paper_black = auto_paper_black(
+                dmin,
+                self.params.dmax,
+                self.params.offset,
+                self.params.wb_high,
+                self.params.wb_low,
+                stats.max,
+            );
+        }
+
+        if self.modes.print_exposure_auto {
+            self.params.print_exposure = auto_print_exposure(
+                dmin,
+                self.params.dmax,
+                self.params.offset,
+                self.params.wb_high,
+                self.params.wb_low,
+                self.params.paper_black,
+                stats.min,
+            );
+        }
     }
 
     /// Invalidates cached preview pixels so the texture will be regenerated.
