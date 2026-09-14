@@ -32,7 +32,7 @@ fn phase13_downscaled_preview_and_instant_rotation_caching() {
         scan_bias: 0.10,
     };
 
-    let mut frame = ReviewFrameState::new(1, working_image, &roll, technical);
+    let mut frame = ReviewFrameState::new(1, working_image, &roll, technical).unwrap();
 
     // Verify preview image was downscaled appropriately (max dimension <= 1440)
     assert!(frame.preview_image.width <= 1440);
@@ -95,7 +95,7 @@ fn phase13_highlight_wb_selection_preserves_master_precision() {
         scan_bias: 0.10,
     };
 
-    let mut frame = ReviewFrameState::new(1, working_image, &roll, technical);
+    let mut frame = ReviewFrameState::new(1, working_image, &roll, technical).unwrap();
 
     // Ensure preview was created
     assert_eq!(frame.preview_image.width, 1000);

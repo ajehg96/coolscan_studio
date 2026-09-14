@@ -18,7 +18,7 @@
 | **Sparse Frame Numbering** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Preserves `p.source.frame_number` end-to-end; covered by regression tests |
 | **Multi-Sampling Limits (1–16)** | ✅ Yes | ✅ Yes | ⚠️ Hardware unverified >16 | N/A | ⏳ Pending | Core, CLI, and GUI aligned to 1–16 |
 | **Frame Selection & Failure Handling** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Empty manual selection triggers validation; zero frames yields `AllFramesFailed` |
-| **Roll vs Stock Calibration** | ⚠️ In progress | ✅ Yes | ⚠️ Measured ProImage only | ⚠️ In progress | ⏳ Pending | Phase 2 separates `FilmStock` from `RollCalibration` |
+| **Roll vs Stock Calibration** | ✅ Yes | ✅ Yes | ⚠️ Measured ProImage only | ✅ Guarded uncalibrated | ⏳ Pending | Phase 2 separates `FilmStock` from `RollCalibration` (Schema v2); unverified D-min defaults removed |
 | **Negadoctor Math & Inversion** | ✅ Yes | ✅ Yes | N/A | ⚠️ Synthetic golden | ⏳ Pending | Phase 6 adds real Darktable 5.6 reference fixtures |
 | **Processing Dependency Graph** | ⚠️ Partial | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 3 introduces deterministic Auto/Manual tracking |
 | **Darktable XMP Export** | ✅ Yes | ✅ Yes | N/A | ⚠️ Partial | ⏳ Pending | Phase 7 adds XML writer & ICC validation |
@@ -43,7 +43,13 @@ At the freeze baseline `72514ea`, sparse frame numbering was broken in review/ex
   - [x] 1.6 Disable/hide no-op scanner offset control in GUI
   - [x] 1.7 Correct mock crop end-exclusive bounds
   - [x] 1.8 Empty manual frame selection validation & regression coverage
-- [ ] **Phase 2: Roll & Calibration Model (PR 2)**
+- [x] **Phase 2: Roll & Calibration Model (PR 2)**
+  - [x] 2.1 Separate `FilmStock` catalog metadata from empirical `RollCalibration` (Schema v2)
+  - [x] 2.2 Retain measured D-min values exclusively for calibrated Kodak Pro Image 100 baseline
+  - [x] 2.3 Remove unverified Portra 400 and Gold 200 D-min defaults
+  - [x] 2.4 Guard Negadoctor auto-processing, `PreparedFrame::from_artifact`, and XMP generation on roll calibration
+  - [x] 2.5 Support backward-compatible migration for v0 and v1 roll profile JSON
+  - [x] 2.6 Surface calibrated vs uncalibrated status in UI and CLI
 - [ ] **Phase 3: Processing Dependency Model (PR 3)**
 - [ ] **Phase 4: Real Hardware Control (PR 4)**
 - [ ] **Phase 5: Per-Frame Streaming & Memory Architecture (PR 5)**

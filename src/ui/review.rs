@@ -16,7 +16,7 @@ use crate::processing::analysis::{
 use crate::processing::color::{ColorError, ScannerColorPipeline};
 use crate::processing::negadoctor::{NegadoctorParams, THRESHOLD};
 use crate::processing::orientation::{Orientation, OrientationScope};
-use crate::processing::roll::{PreparedFrame, RollProfile};
+use crate::processing::roll::{PreparedFrame, RollProfile, RollProfileError};
 
 /// Status and feedback of a highlight white-balance selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,20 +88,23 @@ pub struct ReviewFrameState {
 
 impl ReviewFrameState {
     /// Creates a review frame from a `PreparedFrame` and working image.
+    ///
+    /// Requires that the roll profile contains valid calibration data (D-min).
     pub fn new(
         frame_number: usize,
         working_image: WorkingImage,
         roll: &RollProfile,
         technical: TechnicalAnalysis,
-    ) -> Self {
-        let mut params = NegadoctorParams::from_dmin(roll.dmin);
+    ) -> Result<Self, RollProfileError> {
+        let dmin = roll.dmin().ok_or(RollProfileError::UncalibratedRoll)?;
+        let mut params = NegadoctorParams::from_dmin(dmin);
         params.dmax = technical.dmax;
         params.offset = technical.scan_bias;
         finish_after_white_balance(&working_image, &mut params);
 
         let preview_image = working_image.downscale_to_preview(1440);
 
-        Self {
+        Ok(Self {
             frame_number,
             working_image,
             preview_image,
@@ -114,7 +117,7 @@ impl ReviewFrameState {
             source_artifact: None,
             cached_srgb: None,
             cached_preview: None,
-        }
+        })
     }
 
     pub fn with_artifact(mut self, artifact: crate::scanner::types::FrameArtifact) -> Self {
@@ -353,7 +356,7 @@ impl ReviewSession {
                 &color_pipeline,
             )?;
             let mut frame_state =
-                ReviewFrameState::new(p.source.frame_number, working_image, &p.roll, p.technical);
+                ReviewFrameState::new(p.source.frame_number, working_image, &p.roll, p.technical)?;
             frame_state.orientation = p.orientation;
             frame_state.params = p.params;
             frame_state.source_artifact = Some(p.source);
@@ -380,7 +383,8 @@ impl ReviewSession {
             &self.color_pipeline,
         )?;
         let frame_num = p.source.frame_number;
-        let mut frame_state = ReviewFrameState::new(frame_num, working_image, &p.roll, p.technical);
+        let mut frame_state =
+            ReviewFrameState::new(frame_num, working_image, &p.roll, p.technical)?;
         frame_state.orientation = p.orientation;
         frame_state.params = p.params;
         frame_state.source_artifact = Some(p.source);
@@ -504,9 +508,13 @@ impl ReviewSession {
 
     /// Generates the Darktable XMP sidecar for the current frame.
     pub fn current_darktable_xmp(&self) -> Option<DarktableXmp> {
+        if !self.roll.is_calibrated() {
+            return None;
+        }
         let frame = self.current_frame()?;
         let derived_from = format!("frame-{}.tif", frame.frame_number);
-        let profile_name = self.roll.scanner_profile.icc_profile_name();
+        let scanner_profile = self.roll.scanner_profile();
+        let profile_name = scanner_profile.icc_profile_name();
         DarktableXmp::for_frame(
             &derived_from,
             profile_name,
@@ -525,7 +533,10 @@ impl ReviewSession {
             .current_frame()
             .ok_or_else(|| DarktableError::MissingHistoryItem("No active frame".into()))?;
         let xmp = self.current_darktable_xmp().ok_or_else(|| {
-            DarktableError::MissingHistoryItem("Could not generate XMP for frame".into())
+            DarktableError::MissingHistoryItem(format!(
+                "Could not generate XMP for frame: roll '{}' is uncalibrated or frame missing",
+                self.roll.id
+            ))
         })?;
         let path = output_dir.join(format!("frame-{}.tif.xmp", frame.frame_number));
         xmp.write_to_file(&path)?;
@@ -599,14 +610,14 @@ mod tests {
             dmax: 3.27,
             scan_bias: 0.10,
         };
-        let frame1 = ReviewFrameState::new(1, img1, &roll, tech1);
+        let frame1 = ReviewFrameState::new(1, img1, &roll, tech1).unwrap();
 
         let img2 = mock_working_image(20, 20);
         let tech2 = TechnicalAnalysis {
             dmax: 2.50,
             scan_bias: 0.02,
         };
-        let frame2 = ReviewFrameState::new(2, img2, &roll, tech2);
+        let frame2 = ReviewFrameState::new(2, img2, &roll, tech2).unwrap();
 
         let mut session = ReviewSession::new(vec![frame1, frame2], roll, pipeline);
 
@@ -650,7 +661,7 @@ mod tests {
                     dmax: 3.0,
                     scan_bias: 0.05,
                 };
-                ReviewFrameState::new(i, img, &roll, tech)
+                ReviewFrameState::new(i, img, &roll, tech).unwrap()
             })
             .collect();
 
@@ -681,7 +692,7 @@ mod tests {
             dmax: 3.27,
             scan_bias: 0.10,
         };
-        let mut frame = ReviewFrameState::new(1, img, &roll, tech);
+        let mut frame = ReviewFrameState::new(1, img, &roll, tech).unwrap();
 
         // 1. Too small (3x3)
         frame.apply_highlight_wb_selection(SampleRect::new(5, 5, 3, 3));
@@ -701,7 +712,7 @@ mod tests {
         // Let's create an area with substrate base val = 0.88 to trigger TooDark:
         let base_pixels = vec![[0.89f32; 3]; 100];
         let base_img = WorkingImage::new(10, 10, base_pixels);
-        let mut base_frame = ReviewFrameState::new(1, base_img, &roll, tech);
+        let mut base_frame = ReviewFrameState::new(1, base_img, &roll, tech).unwrap();
 
         base_frame.apply_highlight_wb_selection(SampleRect::new(2, 2, 5, 5));
         assert_eq!(base_frame.selection_status, SelectionStatus::TooDark);
@@ -720,7 +731,7 @@ mod tests {
             dmax: 3.27,
             scan_bias: 0.10,
         };
-        let mut frame = ReviewFrameState::new(1, img, &roll, tech);
+        let mut frame = ReviewFrameState::new(1, img, &roll, tech).unwrap();
 
         let initial_wb = frame.params.wb_high;
         let _initial_black = frame.params.paper_black;
@@ -753,7 +764,7 @@ mod tests {
                     dmax: 3.0,
                     scan_bias: 0.05,
                 };
-                ReviewFrameState::new(i, img, &roll, tech)
+                ReviewFrameState::new(i, img, &roll, tech).unwrap()
             })
             .collect();
 
@@ -785,7 +796,7 @@ mod tests {
             dmax: 3.0,
             scan_bias: 0.05,
         };
-        let mut frame = ReviewFrameState::new(1, img, &roll, tech);
+        let mut frame = ReviewFrameState::new(1, img, &roll, tech).unwrap();
 
         let (w, h, pixels) = frame.get_or_render_preview(&pipeline);
         assert_eq!(w, 10);
@@ -814,7 +825,7 @@ mod tests {
             dmax: 3.10,
             scan_bias: 0.08,
         };
-        let mut frame = ReviewFrameState::new(3, img, &roll, tech);
+        let mut frame = ReviewFrameState::new(3, img, &roll, tech).unwrap();
         frame.orientation = Orientation::Rotate270;
 
         let session = ReviewSession::new(vec![frame], roll, pipeline);
@@ -836,6 +847,18 @@ mod tests {
         assert!((extracted_params.dmax - 3.10).abs() < 1e-4);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn review_frame_state_rejects_uncalibrated_roll() {
+        let roll = RollProfile::portra_400(); // uncalibrated
+        let img = mock_working_image(10, 10);
+        let tech = TechnicalAnalysis {
+            dmax: 3.0,
+            scan_bias: 0.05,
+        };
+        let res = ReviewFrameState::new(1, img, &roll, tech);
+        assert!(matches!(res, Err(RollProfileError::UncalibratedRoll)));
     }
 
     fn mock_prepared_frame(frame_number: usize) -> PreparedFrame {
@@ -877,7 +900,7 @@ mod tests {
             },
             roll: Some(profile.clone()),
         };
-        PreparedFrame::new(artifact, profile)
+        PreparedFrame::new(artifact, profile).unwrap()
     }
 
     #[test]

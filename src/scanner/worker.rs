@@ -114,6 +114,7 @@ impl MockScannerBackend {
         frame_number: usize,
         width: usize,
         height: usize,
+        roll: &RollProfile,
     ) -> PreparedFrame {
         let mut red = vec![10000u16; width * height];
         let mut green = vec![12000u16; width * height];
@@ -189,10 +190,13 @@ impl MockScannerBackend {
                 software_passes: 1,
                 infrared_cleaned_pixels: Some(0),
             },
-            roll: Some(self.roll_profile.clone()),
+            roll: Some(roll.clone()),
         };
 
-        let mut params = NegadoctorParams::from_dmin(self.roll_profile.dmin);
+        let dmin = roll
+            .dmin()
+            .expect("MockScannerBackend requires calibrated roll profile");
+        let mut params = NegadoctorParams::from_dmin(dmin);
         params.dmax = 3.20 + (frame_number as f32 * 0.05);
         params.offset = 0.08 + (frame_number as f32 * 0.01);
         params.paper_black = 0.10;
@@ -205,7 +209,7 @@ impl MockScannerBackend {
 
         PreparedFrame {
             source: artifact,
-            roll: self.roll_profile.clone(),
+            roll: roll.clone(),
             orientation: Orientation::Normal,
             params,
             technical: TechnicalAnalysis { dmax, scan_bias },
@@ -266,6 +270,18 @@ impl ScannerBackend for MockScannerBackend {
         stop_after_current: Arc<AtomicBool>,
         emit: &mut dyn FnMut(WorkerMessage),
     ) {
+        let roll = request
+            .roll
+            .clone()
+            .unwrap_or_else(|| self.roll_profile.clone());
+        if !roll.is_calibrated() {
+            emit(WorkerMessage::Error(format!(
+                "Cannot scan with uncalibrated roll '{}': D-min calibration required",
+                roll.id
+            )));
+            return;
+        }
+
         let frame_numbers = request.frames.resolve(self.frame_count);
         if frame_numbers.is_empty() {
             emit(WorkerMessage::Error(format!(
@@ -313,7 +329,7 @@ impl ScannerBackend for MockScannerBackend {
             }
 
             // Synthesize frame
-            let canned = self.synthesize_canned_frame(frame_num, 40, 60);
+            let canned = self.synthesize_canned_frame(frame_num, 40, 60, &roll);
             emit(WorkerMessage::FrameReady(Box::new(canned)));
 
             emit(WorkerMessage::Event(ScanEvent::FrameCompleted {
@@ -476,6 +492,14 @@ impl ScannerBackend for HardwareScannerBackend {
             .roll
             .clone()
             .unwrap_or_else(|| self.roll_profile.clone());
+        if !roll.is_calibrated() {
+            emit(WorkerMessage::Error(format!(
+                "Cannot scan with uncalibrated roll '{}': D-min calibration required",
+                roll.id
+            )));
+            return;
+        }
+
         let default_pipeline;
         let pipeline: &ScannerColorPipeline = match &self.color_pipeline {
             Some(p) => p,
@@ -503,15 +527,25 @@ impl ScannerBackend for HardwareScannerBackend {
 
         match scan_result {
             Ok(result) => {
+                let mut prepared_count = 0;
                 for artifact in result.frames {
                     match PreparedFrame::from_artifact(artifact, roll.clone(), pipeline) {
-                        Ok(prepared) => emit(WorkerMessage::FrameReady(Box::new(prepared))),
+                        Ok(prepared) => {
+                            prepared_count += 1;
+                            emit(WorkerMessage::FrameReady(Box::new(prepared)));
+                        }
                         Err(e) => emit(WorkerMessage::Error(format!(
                             "Frame preparation error: {e}"
                         ))),
                     }
                 }
-                emit(WorkerMessage::StripScanComplete);
+                if prepared_count > 0 {
+                    emit(WorkerMessage::StripScanComplete);
+                } else {
+                    emit(WorkerMessage::Error(
+                        "Scan finished but no frames could be prepared".into(),
+                    ));
+                }
             }
             Err(e) => {
                 emit(WorkerMessage::Error(format!("Scan failed: {e}")));
@@ -823,6 +857,33 @@ mod tests {
         assert!(
             error_received,
             "Expected AllFramesFailed error message when zero frames are discovered"
+        );
+    }
+
+    #[test]
+    fn mock_backend_uncalibrated_roll_fails() {
+        let handle = ScannerWorkerHandle::spawn_mock(6);
+
+        let mut req = ScanRequest::new(FrameSelection::All, 2900, 1, false, true);
+        req.roll = Some(RollProfile::portra_400()); // uncalibrated
+        handle.send(ScanCommand::StartScan(Box::new(req)));
+
+        let mut error_received = false;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            if matches!(
+                handle.try_recv(),
+                Some(WorkerMessage::Error(err)) if err.contains("uncalibrated roll")
+            ) {
+                error_received = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(
+            error_received,
+            "Expected error when scanning with uncalibrated roll"
         );
     }
 }
