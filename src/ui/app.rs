@@ -78,16 +78,11 @@ impl Default for ScanSetupState {
 impl ScanSetupState {
     /// Creates a scan setup configured for a specific roll profile.
     pub fn for_roll(roll: RollProfile) -> Self {
-        let film_stock_index = if roll.id.0 == "kodak-pro-image-100"
-            || roll.film_stock.name == "Kodak Pro Image 100"
-        {
-            0
-        } else if roll.id.0 == "kodak-portra-400" || roll.film_stock.name == "Kodak Portra 400" {
-            1
-        } else if roll.id.0 == "kodak-gold-200" || roll.film_stock.name == "Kodak Gold 200" {
-            2
-        } else {
-            3
+        let film_stock_index = match roll.id.0.as_str() {
+            "kodak-pro-image-100" => 0,
+            "kodak-portra-400" => 1,
+            "kodak-gold-200" => 2,
+            _ => 3,
         };
         Self {
             film_stock_index,
@@ -1354,5 +1349,28 @@ mod tests {
         assert_eq!(app.scan_setup.film_stock_index, 3);
         let req = app.build_scan_request();
         assert_eq!(req.roll.unwrap().id.0, "my-custom-roll");
+    }
+
+    #[test]
+    fn test_custom_roll_with_preset_stock_name_is_classified_as_custom() {
+        use crate::processing::{FilmStock, ScannerProfile};
+        let custom = RollProfile::calibrated(
+            "roll-001",
+            "My Portra Roll",
+            FilmStock::portra_400(),
+            [0.8, 0.8, 0.8],
+            ScannerProfile::ls40_negative(),
+        ).unwrap();
+
+        let setup = ScanSetupState::for_roll(custom.clone());
+
+        assert_eq!(setup.film_stock_index, 3);
+        assert_eq!(setup.selected_roll(), custom);
+        
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let session = ReviewSession::empty(custom.clone(), pipeline);
+        let app = ReviewApp::new(session);
+        let req = app.build_scan_request();
+        assert_eq!(req.roll.unwrap(), custom);
     }
 }
