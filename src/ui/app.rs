@@ -1360,13 +1360,14 @@ mod tests {
             FilmStock::portra_400(),
             [0.8, 0.8, 0.8],
             ScannerProfile::ls40_negative(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let setup = ScanSetupState::for_roll(custom.clone());
 
         assert_eq!(setup.film_stock_index, 3);
         assert_eq!(setup.selected_roll(), custom);
-        
+
         let pipeline = ScannerColorPipeline::default_ls40().unwrap();
         let session = ReviewSession::empty(custom.clone(), pipeline);
         let app = ReviewApp::new(session);
