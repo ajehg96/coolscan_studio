@@ -20,7 +20,7 @@
 | **Frame Selection & Failure Handling** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Empty manual selection triggers validation; zero frames yields `AllFramesFailed` |
 | **Roll vs Stock Calibration** | ✅ Yes | ✅ Yes | ⚠️ Measured ProImage only | ✅ Guarded uncalibrated | ⏳ Pending | Phase 2 separates `FilmStock` from `RollCalibration` (Schema v2); unverified D-min defaults removed |
 | **Negadoctor Math & Inversion** | ✅ Yes | ✅ Yes | N/A | ⚠️ Synthetic golden | ⏳ Pending | Phase 6 adds real Darktable 5.6 reference fixtures |
-| **Processing Dependency Graph** | ⚠️ Partial | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 3 introduces deterministic Auto/Manual tracking |
+| **Processing Dependency Graph** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 3 enforces deterministic Auto/Manual tracking (`NegadoctorModes`) |
 | **Darktable XMP Export** | ✅ Yes | ✅ Yes | N/A | ⚠️ Partial | ⏳ Pending | Phase 7 adds XML writer & ICC validation |
 | **TIFF Master / Working Output** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 7 formalizes master vs working TIFF policy |
 | **GUI Review Studio** | ✅ Yes | ✅ Yes | ⚠️ Live worker wired | N/A | ⏳ Pending | Disconnected mode on missing HW; unsupported offset slider disabled |
@@ -50,7 +50,12 @@ At the freeze baseline `72514ea`, sparse frame numbering was broken in review/ex
   - [x] 2.4 Guard Negadoctor auto-processing, `PreparedFrame::from_artifact`, and XMP generation on roll calibration
   - [x] 2.5 Support backward-compatible migration for v0 and v1 roll profile JSON
   - [x] 2.6 Surface calibrated vs uncalibrated status in UI and CLI
-- [ ] **Phase 3: Processing Dependency Model (PR 3)**
+- [x] **Phase 3: Processing Dependency Model (PR 3)**
+  - [x] 3.1 Introduce `NegadoctorModes` and `WhiteBalanceMode` (`Neutral`, `SampledAuto`, `Manual`)
+  - [x] 3.2 Implement `ReviewFrameState::recalculate_downstream` (`D-min` → `D-max` → `scan bias` → `highlight WB` → `paper black` → `print exposure`)
+  - [x] 3.3 Preserve full-frame `image_stats` in `ReviewFrameState` across live worker and session initialization
+  - [x] 3.4 Add Reset-to-Auto (`⟲`) controls and downstream recalculation triggers in `ReviewApp`
+  - [x] 3.5 Add regression tests covering dependency chains, manual overrides, and live mock worker stats
 - [ ] **Phase 4: Real Hardware Control (PR 4)**
 - [ ] **Phase 5: Per-Frame Streaming & Memory Architecture (PR 5)**
 - [ ] **Phase 6: Darktable Parity Fixtures (PR 6)**
