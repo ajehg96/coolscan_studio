@@ -234,7 +234,8 @@ fn main() {
             requested_samples,
             do_clean,
             options.auto_crop,
-        );
+        )
+        .with_offset_mm(options.offset_mm);
         if let Some(p) = roll_profile {
             request = request.with_roll(p);
         }
@@ -365,6 +366,22 @@ fn main() {
                 reason,
             } => {
                 eprintln!("Skipping frame {frame_number} due to: {reason}");
+            }
+            ScanEvent::FrameOffsetApplied {
+                frame_number,
+                offset_mm,
+                offset_dots,
+                ..
+            } => {
+                println!(
+                    "  Applied travel offset to Frame {frame_number}: {offset_mm:+.2} mm ({offset_dots:+} dots)."
+                );
+            }
+            ScanEvent::FrameCancelled { reason, .. } => {
+                println!("  Scan cancelled: {reason}");
+            }
+            ScanEvent::ScanStoppedAfterFrame { frame_number } => {
+                println!("  Stopped after completing Frame {frame_number}.");
             }
             ScanEvent::FrameCompleted { .. } => {}
             _ => {}

@@ -16,8 +16,8 @@ use crate::{
     scanner::{
         recovery::{INTER_FRAME_DELAY, MAX_SCAN_ATTEMPTS, RETRY_DELAY, refresh_session},
         types::{
-            CropFallbackReason, FrameArtifact, ScanError, ScanEvent, ScanMetadata, ScanPhase,
-            ScanRequest, StripDiscovery, StripScanResult,
+            CropFallbackReason, FrameArtifact, ScanControl, ScanError, ScanEvent, ScanMetadata,
+            ScanPhase, ScanRequest, StripDiscovery, StripScanResult,
         },
     },
 };
@@ -211,12 +211,112 @@ pub fn check_acquired_artifacts(acquired: &[FrameArtifact]) -> Result<(), ScanEr
     }
 }
 
+/// Checks whether the active pass should continue or abort inside the `nkscan` progress callback.
+pub fn check_pass_progress_control(control: &ScanControl) -> std::ops::ControlFlow<()> {
+    if control.is_cancel_requested() {
+        std::ops::ControlFlow::Break(())
+    } else {
+        std::ops::ControlFlow::Continue(())
+    }
+}
+
+/// Outcome of a single scan pass, distinguishing intentional cancellation from transport/incomplete errors.
+pub enum PassOutcome {
+    Completed(frame::Scanned),
+    Cancelled,
+    Failed,
+}
+
+/// Classifies the result of `frame::scan_frame_with` alongside the `ScanControl` state.
+///
+/// Ensures user cancellation (`Error::Cancelled` or `cancel_current` set) never triggers USB retry loops.
+pub fn classify_pass_result(
+    result: Result<frame::Scanned, nkscan::error::Error>,
+    control: &ScanControl,
+) -> PassOutcome {
+    if control.is_cancel_requested() {
+        return PassOutcome::Cancelled;
+    }
+    match result {
+        Ok(scanned) if scanned.pass.complete => PassOutcome::Completed(scanned),
+        Err(nkscan::error::Error::Cancelled) => PassOutcome::Cancelled,
+        Ok(_) | Err(_) => PassOutcome::Failed,
+    }
+}
+
+/// Resolves and validates the adjusted frame rectangle for a given frame and travel offset (`offset_mm`).
+pub fn resolve_frame_rect(
+    frame_number: usize,
+    detected: Rect,
+    offset_mm: f64,
+    y_dpi: u16,
+    scanner_bounds: Rect,
+    max_width: u32,
+    max_height: u32,
+) -> Result<(Rect, i32), ScanError> {
+    crate::frame_position::apply_offset_within(
+        detected,
+        offset_mm,
+        y_dpi,
+        scanner_bounds,
+        max_width,
+        max_height,
+    )
+    .map_err(|reason| ScanError::InvalidOffset {
+        frame_number,
+        offset_mm,
+        reason: reason.to_string(),
+    })
+}
+
+/// Shifts a `BoundaryType2` table's frame top coordinates by `offset_dots`, validating `[y_start, y_end]`.
+pub fn adjust_boundary_table(
+    table: &BoundaryType2,
+    offset_dots: i32,
+    y_start: u32,
+    y_end: u32,
+) -> Option<BoundaryType2> {
+    if offset_dots == 0 {
+        return Some(table.clone());
+    }
+    let mut adjusted = Vec::with_capacity(table.frames.len());
+    for entry in &table.frames {
+        let new_top = entry.top.checked_add_signed(offset_dots)?;
+        if new_top < y_start || new_top > y_end {
+            return None;
+        }
+        let mut updated = *entry;
+        updated.top = new_top;
+        adjusted.push(updated);
+    }
+    Some(BoundaryType2 { frames: adjusted })
+}
+
 /// Executes a complete strip scan using an already established scanner session.
 pub fn scan_strip_with_session(
+    scanner: &Device,
+    session: Session,
+    request: &ScanRequest,
+    pre_discovery: Option<StripDiscovery>,
+    progress: impl FnMut(ScanEvent),
+) -> Result<StripScanResult, ScanError> {
+    scan_strip_with_control(
+        scanner,
+        session,
+        request,
+        pre_discovery,
+        &ScanControl::default(),
+        progress,
+    )
+}
+
+/// Executes a complete strip scan with explicit live `ScanControl` (cancellation and stop-after-current).
+pub fn scan_strip_with_control(
     scanner: &Device,
     mut session: Session,
     request: &ScanRequest,
     pre_discovery: Option<StripDiscovery>,
+    control: &ScanControl,
     mut progress: impl FnMut(ScanEvent),
 ) -> Result<StripScanResult, ScanError> {
     request.validate().map_err(ScanError::Request)?;
@@ -237,6 +337,32 @@ pub fn scan_strip_with_session(
     let y_dpi = strip_discovery.optical_dpi.1;
     let scan_dpi = request.dpi;
     let do_clean = request.clean;
+
+    let (scanner_bounds, x_boundary, y_boundary, y_start, y_end) = {
+        let caps = session.capabilities();
+        let x = &caps.address.x_axis;
+        let y = &caps.address.y_axis;
+        let bounds = crate::frame_position::scanner_bounds(
+            x.address_range.start,
+            x.address_range.last,
+            x.boundary,
+            y.address_range.start,
+            y.address_range.last,
+            y.boundary,
+        )
+        .ok_or_else(|| ScanError::InvalidOffset {
+            frame_number: 0,
+            offset_mm: request.offset_mm,
+            reason: "Invalid scanner address limits.".into(),
+        })?;
+        (
+            bounds,
+            x.boundary,
+            y.boundary,
+            y.address_range.start,
+            bounds.bottom,
+        )
+    };
 
     let supports_multi_reading = session
         .capabilities()
@@ -273,6 +399,37 @@ pub fn scan_strip_with_session(
 
     let frames_to_scan = request.frames.resolve(strip_discovery.frame_count());
 
+    // Pre-validate travel offset for all requested frames within the discovered strip
+    let mut adjusted_frame_rects = std::collections::HashMap::new();
+    let mut applied_offset_dots = 0i32;
+    for &frame_num in &frames_to_scan {
+        let frame_idx = frame_num
+            .checked_sub(1)
+            .ok_or(ScanError::FrameUnavailable(frame_num))?;
+        if let Some(&detected_rect) = strip_discovery.frames().get(frame_idx) {
+            let (adjusted_rect, offset_dots) = resolve_frame_rect(
+                frame_num,
+                detected_rect,
+                request.offset_mm,
+                y_dpi,
+                scanner_bounds,
+                x_boundary,
+                y_boundary,
+            )?;
+            applied_offset_dots = offset_dots;
+            adjusted_frame_rects.insert(frame_num, (adjusted_rect, offset_dots));
+        }
+    }
+
+    let mut boundary_table = strip_discovery.boundary_table.clone();
+    if applied_offset_dots != 0
+        && let Some(ref table) = boundary_table
+        && let Some(shifted) = adjust_boundary_table(table, applied_offset_dots, y_start, y_end)
+    {
+        let _ = session.set_boundaries_type2(&shifted);
+        boundary_table = Some(shifted);
+    }
+
     let mut features = Vec::new();
     if software_passes > 1 {
         features.push(format!("{software_passes}x multi-pass averaging"));
@@ -282,22 +439,55 @@ pub fn scan_strip_with_session(
     if do_clean {
         features.push("OpenICE IR cleaning".into());
     }
+    if applied_offset_dots != 0 {
+        features.push(format!(
+            "offset {:+.2} mm ({:+} dots)",
+            request.offset_mm, applied_offset_dots
+        ));
+    }
 
-    let boundary_table = strip_discovery.boundary_table.clone();
     let mut current_session = Some(session);
     let mut acquired_artifacts = Vec::new();
+    let mut stop_reason: Option<String> = None;
+    let mut cancelled_frame: Option<usize> = None;
 
     for (seq_idx, &frame_num) in frames_to_scan.iter().enumerate() {
+        // Checkpoint 1: Check cancellation before starting frame
+        if control.take_cancel_requested() {
+            let reason = format!("Frame {frame_num} cancelled");
+            progress(ScanEvent::FrameCancelled {
+                frame_number: frame_num,
+                reason: reason.clone(),
+            });
+            cancelled_frame = Some(frame_num);
+            stop_reason = Some(reason);
+            break;
+        }
+
         let frame_idx = frame_num
             .checked_sub(1)
             .ok_or(ScanError::FrameUnavailable(frame_num))?;
-        let Some(&rect) = strip_discovery.frames().get(frame_idx) else {
+        let Some(&detected_rect) = strip_discovery.frames().get(frame_idx) else {
             progress(ScanEvent::FrameSkipped {
                 frame_number: frame_num,
                 reason: format!("Frame {frame_num} is outside discovered bounds"),
             });
             continue;
         };
+
+        let (rect, offset_dots) = adjusted_frame_rects
+            .get(&frame_num)
+            .copied()
+            .unwrap_or((detected_rect, 0));
+
+        if offset_dots != 0 {
+            progress(ScanEvent::FrameOffsetApplied {
+                frame_number: frame_num,
+                offset_mm: request.offset_mm,
+                offset_dots,
+                adjusted_rect: rect,
+            });
+        }
 
         progress(ScanEvent::FrameStarted {
             frame_number: frame_num,
@@ -310,8 +500,14 @@ pub fn scan_strip_with_session(
         let mut final_samples = None;
         let mut final_pass = None;
         let mut final_exposures = None;
+        let mut cancelled_during_frame = false;
 
         for attempt in 1..=MAX_SCAN_ATTEMPTS {
+            if control.is_cancel_requested() {
+                cancelled_during_frame = true;
+                break;
+            }
+
             progress(ScanEvent::FrameAttemptStarted {
                 frame_number: frame_num,
                 attempt,
@@ -325,6 +521,13 @@ pub fn scan_strip_with_session(
             let mut attempt_exposure = AttemptExposureState::new();
 
             for pass_idx in 1..=software_passes {
+                // Checkpoint 2: Check cancellation before each pass
+                if control.is_cancel_requested() {
+                    cancelled_during_frame = true;
+                    pass_succeeded = false;
+                    break;
+                }
+
                 progress(ScanEvent::FramePassStarted {
                     frame_number: frame_num,
                     pass: pass_idx as usize,
@@ -352,6 +555,9 @@ pub fn scan_strip_with_session(
                     scan_opts,
                     &mut pass_samples,
                     |phase, progress_info| {
+                        // Checkpoint 3: Check cancellation inside nkscan progress callback
+                        check_pass_progress_control(control)?;
+
                         let mapped_phase = match phase {
                             frame::Phase::Meter(_) => ScanPhase::Metering,
                             frame::Phase::Scan => ScanPhase::Acquiring,
@@ -382,13 +588,15 @@ pub fn scan_strip_with_session(
                     progress(ScanEvent::ProgressPhaseEnd);
                 }
 
-                let scanned = match scan_result {
-                    Ok(scanned) if scanned.pass.complete => scanned,
-                    Ok(_) => {
+                // Checkpoint 4: Classify pass outcome and check cancellation after pass
+                let scanned = match classify_pass_result(scan_result, control) {
+                    PassOutcome::Completed(scanned) => scanned,
+                    PassOutcome::Cancelled => {
+                        cancelled_during_frame = true;
                         pass_succeeded = false;
                         break;
                     }
-                    Err(_) => {
+                    PassOutcome::Failed => {
                         pass_succeeded = false;
                         break;
                     }
@@ -420,6 +628,11 @@ pub fn scan_strip_with_session(
 
                 current_final_pass = Some(scanned.pass.clone());
                 attempt_exposure.record_pass(scanned);
+            }
+
+            if cancelled_during_frame || control.is_cancel_requested() {
+                cancelled_during_frame = true;
+                break;
             }
 
             if pass_succeeded && current_final_pass.is_some() {
@@ -465,6 +678,18 @@ pub fn scan_strip_with_session(
                     }
                 }
             }
+        }
+
+        if cancelled_during_frame || control.take_cancel_requested() {
+            control.take_cancel_requested();
+            let reason = format!("Frame {frame_num} cancelled during scan");
+            progress(ScanEvent::FrameCancelled {
+                frame_number: frame_num,
+                reason: reason.clone(),
+            });
+            cancelled_frame = Some(frame_num);
+            stop_reason = Some(reason);
+            break;
         }
 
         let (mut final_samples, final_pass) = match (final_samples, final_pass) {
@@ -579,6 +804,24 @@ pub fn scan_strip_with_session(
 
         acquired_artifacts.push(artifact);
 
+        // Checkpoint 5: Check stop-after-current (or late cancel) after frame completion before opening next frame
+        if control.take_stop_after_current_requested() {
+            progress(ScanEvent::ScanStoppedAfterFrame {
+                frame_number: frame_num,
+            });
+            stop_reason = Some("Stopped after current frame".into());
+            break;
+        }
+        if control.take_cancel_requested() {
+            let reason = format!("Stopped after frame {frame_num} (cancel requested)");
+            progress(ScanEvent::FrameCancelled {
+                frame_number: frame_num,
+                reason: reason.clone(),
+            });
+            stop_reason = Some(reason);
+            break;
+        }
+
         // Reset USB session between frames to maintain fresh transport state
         if seq_idx + 1 < frames_to_scan.len() {
             let next_num = frames_to_scan[seq_idx + 1];
@@ -620,12 +863,22 @@ pub fn scan_strip_with_session(
         }
     }
 
+    if acquired_artifacts.is_empty()
+        && let Some(reason) = stop_reason
+    {
+        return Err(ScanError::Cancelled {
+            frame_number: cancelled_frame,
+            reason,
+        });
+    }
+
     check_acquired_artifacts(&acquired_artifacts)?;
 
     Ok(StripScanResult {
         frames: acquired_artifacts,
         discovery: strip_discovery,
         roll: request.roll.clone(),
+        stop_reason,
     })
 }
 
@@ -738,5 +991,105 @@ mod tests {
         let req = ScanRequest::new(FrameSelection::All, 2900, 1, false, false);
         let frames_to_scan = req.frames.resolve(6);
         assert_eq!(frames_to_scan, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn test_pass_progress_control_and_classification() {
+        let control = ScanControl::default();
+        assert_eq!(
+            check_pass_progress_control(&control),
+            std::ops::ControlFlow::Continue(())
+        );
+
+        // Completed pass when not cancelled
+        let completed = classify_pass_result(Ok(dummy_scanned(1000)), &control);
+        assert!(matches!(completed, PassOutcome::Completed(_)));
+
+        // Incomplete pass when not cancelled -> Failed (eligible for retry)
+        let mut incomplete_scan = dummy_scanned(1000);
+        incomplete_scan.pass.complete = false;
+        let failed = classify_pass_result(Ok(incomplete_scan), &control);
+        assert!(matches!(failed, PassOutcome::Failed));
+
+        // nkscan Error::Cancelled -> Cancelled (must NOT retry)
+        let nk_cancelled = classify_pass_result(Err(nkscan::error::Error::Cancelled), &control);
+        assert!(matches!(nk_cancelled, PassOutcome::Cancelled));
+
+        // Atomic cancel_current flag set -> Break in callback and Cancelled outcome
+        control.request_cancel_current();
+        assert_eq!(
+            check_pass_progress_control(&control),
+            std::ops::ControlFlow::Break(())
+        );
+        let flag_cancelled = classify_pass_result(Ok(dummy_scanned(1000)), &control);
+        assert!(matches!(flag_cancelled, PassOutcome::Cancelled));
+        assert!(control.take_cancel_requested());
+        assert!(!control.is_cancel_requested());
+    }
+
+    #[test]
+    fn test_resolve_frame_rect_and_boundary_cases() {
+        let bounds = crate::frame_position::scanner_bounds(0, 0, 2870, 0, 34656, 4332).unwrap();
+        let frame_1 = Rect {
+            left: 0,
+            right: 2869,
+            top: 90,
+            bottom: 4259,
+        };
+        let frame_6 = Rect {
+            left: 0,
+            right: 2869,
+            top: 30387,
+            bottom: 34556,
+        };
+
+        // Valid +0.5 mm offset on Frame 1
+        let (adj, dots) = resolve_frame_rect(1, frame_1, 0.5, 2900, bounds, 2870, 4332).unwrap();
+        assert_eq!(dots, 57);
+        assert_eq!(adj.top, 147);
+        assert_eq!(adj.bottom, 4316);
+
+        // Invalid -1.0 mm offset on Frame 1 (underflows top = 0)
+        let err_f1 = resolve_frame_rect(1, frame_1, -1.0, 2900, bounds, 2870, 4332).unwrap_err();
+        assert!(matches!(
+            err_f1,
+            ScanError::InvalidOffset {
+                frame_number: 1,
+                ..
+            }
+        ));
+
+        // Invalid +1.0 mm offset on Frame 6 (exceeds bottom = 34656)
+        let err_f6 = resolve_frame_rect(6, frame_6, 1.0, 2900, bounds, 2870, 4332).unwrap_err();
+        assert!(matches!(
+            err_f6,
+            ScanError::InvalidOffset {
+                frame_number: 6,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_adjust_boundary_table() {
+        let perf = nkscan::protocol::data::PerforationInformation {
+            perf_number: 8,
+            count_switching_flag: false,
+            perf_decimal: 1,
+            pulse_number: 6,
+        };
+        let table = BoundaryType2 {
+            frames: vec![
+                nkscan::protocol::data::FramePosition::new(90, &perf),
+                nkscan::protocol::data::FramePosition::new(4380, &perf),
+            ],
+        };
+
+        let shifted = adjust_boundary_table(&table, 57, 0, 34656).unwrap();
+        assert_eq!(shifted.frames[0].top, 147);
+        assert_eq!(shifted.frames[1].top, 4437);
+
+        // Shifting frame 1 below 0 returns None
+        assert!(adjust_boundary_table(&table, -100, 0, 34656).is_none());
     }
 }

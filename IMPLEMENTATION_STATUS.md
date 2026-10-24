@@ -10,10 +10,10 @@
 
 | Subsystem / Feature | Implemented | Mock Validated | Hardware Tested | DT Parity Tested | Release Ready | Notes |
 |---|---|---|---|---|---|---|
-| **Discovery & Framing** | ✅ Yes | ✅ Yes | ⚠️ Partial (Phase 1-8) | N/A | ⏳ Pending | Frame bounds detection works; offset control pending Phase 4 |
+| **Discovery & Framing** | ✅ Yes | ✅ Yes | ⚠️ Partial (Phase 1-8) | N/A | ⏳ Pending | Frame bounds detection and validated travel offset (`offset_mm`) active |
 | **Exposure & Transport Retry** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Scoped per attempt via `AttemptExposureState`; resets cleanly across retries |
-| **Real Hardware Cancellation** | ❌ No | ✅ Mock only | ❌ No | N/A | ❌ Blocked | Phase 4 target; hardware backend currently defers cancellation |
-| **Stop After Current Frame** | ❌ No | ✅ Mock only | ❌ No | N/A | ❌ Blocked | Phase 4 target |
+| **Real Hardware Cancellation** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 4 wires `ScanControl` across all 5 checkpoints & `nkscan` callback |
+| **Stop After Current Frame** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 4 stops cleanly after active frame without inter-frame USB reset |
 | **Per-Frame Streaming Delivery** | ❌ No | ✅ Mock only | ❌ No | N/A | ❌ Blocked | Phase 5 target; hardware currently batches whole strip |
 | **Sparse Frame Numbering** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Preserves `p.source.frame_number` end-to-end; covered by regression tests |
 | **Multi-Sampling Limits (1–16)** | ✅ Yes | ✅ Yes | ⚠️ Hardware unverified >16 | N/A | ⏳ Pending | Core, CLI, and GUI aligned to 1–16 |
@@ -23,7 +23,7 @@
 | **Processing Dependency Graph** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 3 enforces deterministic Auto/Manual tracking (`NegadoctorModes`) |
 | **Darktable XMP Export** | ✅ Yes | ✅ Yes | N/A | ⚠️ Partial | ⏳ Pending | Phase 7 adds XML writer & ICC validation |
 | **TIFF Master / Working Output** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 7 formalizes master vs working TIFF policy |
-| **GUI Review Studio** | ✅ Yes | ✅ Yes | ⚠️ Live worker wired | N/A | ⏳ Pending | Disconnected mode on missing HW; unsupported offset slider disabled |
+| **GUI Review Studio** | ✅ Yes | ✅ Yes | ⚠️ Live worker wired | N/A | ⏳ Pending | Disconnected mode on missing HW; travel offset slider enabled & validated |
 | **GitHub Actions CI** | ✅ Yes | N/A | N/A | N/A | ✅ Active | Ubuntu & Windows workflows active on pinned Rust 1.98.1 toolchain |
 
 ### Baseline Context (at Commit `72514ea`)
@@ -56,7 +56,12 @@ At the freeze baseline `72514ea`, sparse frame numbering was broken in review/ex
   - [x] 3.3 Preserve full-frame `image_stats` in `ReviewFrameState` across live worker and session initialization
   - [x] 3.4 Add Reset-to-Auto (`⟲`) controls and downstream recalculation triggers in `ReviewApp`
   - [x] 3.5 Add regression tests covering dependency chains, manual overrides, and live mock worker stats
-- [ ] **Phase 4: Real Hardware Control (PR 4)**
+- [x] **Phase 4: Real Hardware Control (PR 4)**
+  - [x] 4.1 Introduce `ScanControl` (`cancel_current`, `stop_after_current`) and `scan_strip_with_control`
+  - [x] 4.2 Enforce cancellation checkpoints before frame, before pass, inside `nkscan` callback (`ControlFlow::Break`), and after pass without triggering USB retry loops
+  - [x] 4.3 Enforce `stop_after_current` after frame completion before inter-frame USB refresh
+  - [x] 4.4 Wire `HardwareScannerBackend::scan_strip` to `scan_strip_with_control` and emit `WorkerMessage::ScanCancelled`
+  - [x] 4.5 Implement and validate `offset_mm` travel offset geometry (`resolve_frame_rect`, `adjust_boundary_table`) and re-enable GUI slider
 - [ ] **Phase 5: Per-Frame Streaming & Memory Architecture (PR 5)**
 - [ ] **Phase 6: Darktable Parity Fixtures (PR 6)**
 - [ ] **Phase 7: Export Hardening (PR 7)**

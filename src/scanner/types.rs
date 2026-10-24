@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use nkscan::{
     protocol::{
         data::{BoundaryType2, Rect},
@@ -7,6 +12,53 @@ use nkscan::{
 };
 
 use crate::processing::roll::RollProfile;
+
+/// Shared atomic control flags for live scan cancellation and stop-after-current-frame.
+#[derive(Debug, Clone, Default)]
+pub struct ScanControl {
+    pub cancel_current: Arc<AtomicBool>,
+    pub stop_after_current: Arc<AtomicBool>,
+}
+
+impl ScanControl {
+    /// Creates a `ScanControl` sharing existing atomic flags.
+    pub fn new(cancel_current: Arc<AtomicBool>, stop_after_current: Arc<AtomicBool>) -> Self {
+        Self {
+            cancel_current,
+            stop_after_current,
+        }
+    }
+
+    /// Requests immediate cancellation of the active frame.
+    pub fn request_cancel_current(&self) {
+        self.cancel_current.store(true, Ordering::Relaxed);
+    }
+
+    /// Requests stopping after the active frame completes.
+    pub fn request_stop_after_current(&self) {
+        self.stop_after_current.store(true, Ordering::Relaxed);
+    }
+
+    /// Returns whether immediate frame cancellation has been requested.
+    pub fn is_cancel_requested(&self) -> bool {
+        self.cancel_current.load(Ordering::Relaxed)
+    }
+
+    /// Atomically reads and clears the immediate frame cancellation flag.
+    pub fn take_cancel_requested(&self) -> bool {
+        self.cancel_current.swap(false, Ordering::Relaxed)
+    }
+
+    /// Returns whether stop-after-current-frame has been requested.
+    pub fn is_stop_after_current_requested(&self) -> bool {
+        self.stop_after_current.load(Ordering::Relaxed)
+    }
+
+    /// Atomically reads and clears the stop-after-current-frame flag.
+    pub fn take_stop_after_current_requested(&self) -> bool {
+        self.stop_after_current.swap(false, Ordering::Relaxed)
+    }
+}
 
 /// Selection of frames to scan from a strip.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +99,7 @@ pub enum ScanRequestError {
     InvalidSamples(u8),
     InvalidFrameNumber(usize),
     EmptyFrameList,
+    InvalidOffset,
 }
 
 impl std::fmt::Display for ScanRequestError {
@@ -63,6 +116,9 @@ impl std::fmt::Display for ScanRequestError {
             }
             ScanRequestError::EmptyFrameList => {
                 write!(f, "Frame selection list cannot be empty.")
+            }
+            ScanRequestError::InvalidOffset => {
+                write!(f, "Travel offset must be a finite number in millimetres.")
             }
         }
     }
@@ -107,6 +163,9 @@ impl ScanRequest {
         }
         if self.samples == 0 || self.samples > 16 {
             return Err(ScanRequestError::InvalidSamples(self.samples));
+        }
+        if !self.offset_mm.is_finite() {
+            return Err(ScanRequestError::InvalidOffset);
         }
         match &self.frames {
             FrameSelection::Specific(0) => return Err(ScanRequestError::InvalidFrameNumber(0)),
@@ -182,6 +241,8 @@ pub struct StripScanResult {
     pub frames: Vec<FrameArtifact>,
     pub discovery: StripDiscovery,
     pub roll: Option<RollProfile>,
+    /// Populated when scanning stopped early due to user `stop_after_current` or mid-strip cancellation.
+    pub stop_reason: Option<String>,
 }
 
 /// A scanned frame artifact preserving high-bit-depth master samples,
@@ -372,6 +433,19 @@ pub enum ScanEvent {
         frame_number: usize,
         reason: String,
     },
+    FrameOffsetApplied {
+        frame_number: usize,
+        offset_mm: f64,
+        offset_dots: i32,
+        adjusted_rect: Rect,
+    },
+    FrameCancelled {
+        frame_number: usize,
+        reason: String,
+    },
+    ScanStoppedAfterFrame {
+        frame_number: usize,
+    },
 }
 
 /// Errors that can occur during scanner pipeline execution.
@@ -387,6 +461,15 @@ pub enum ScanError {
     FrameUnavailable(usize),
     ReconnectFailed(String),
     AllFramesFailed,
+    InvalidOffset {
+        frame_number: usize,
+        offset_mm: f64,
+        reason: String,
+    },
+    Cancelled {
+        frame_number: Option<usize>,
+        reason: String,
+    },
     Request(ScanRequestError),
 }
 
@@ -403,6 +486,15 @@ impl std::fmt::Display for ScanError {
             ScanError::FrameUnavailable(n) => write!(f, "Frame {n} is unavailable."),
             ScanError::ReconnectFailed(msg) => write!(f, "Scanner reconnect failed: {msg}"),
             ScanError::AllFramesFailed => write!(f, "All requested frames failed to scan."),
+            ScanError::InvalidOffset {
+                frame_number,
+                offset_mm,
+                reason,
+            } => write!(
+                f,
+                "Invalid travel offset ({offset_mm:+.2} mm) for frame {frame_number}: {reason}"
+            ),
+            ScanError::Cancelled { reason, .. } => write!(f, "Scan cancelled: {reason}"),
             ScanError::Request(e) => write!(f, "Invalid scan request: {e}"),
         }
     }
