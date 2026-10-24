@@ -234,11 +234,10 @@ fn phase13_dependency_model_recalculation_chain() {
 
 #[test]
 fn phase13_mock_mode_non_zero_real_image_stats() {
-    use coolscan_studio::scanner::types::{FrameSelection, ScanEvent, ScanRequest};
-    use coolscan_studio::scanner::worker::{ScanCommand, ScannerWorkerHandle};
+    use coolscan_studio::scanner::types::{FrameSelection, ScanRequest};
+    use coolscan_studio::scanner::worker::{ScanCommand, ScannerWorkerHandle, WorkerMessage};
     use coolscan_studio::ui::ReviewSession;
 
-    let roll = RollProfile::pro_image_100();
     let handle = ScannerWorkerHandle::spawn_mock(1);
     handle.send(ScanCommand::CheckMedia);
     handle.send(ScanCommand::DiscoverStrip);
@@ -249,11 +248,9 @@ fn phase13_mock_mode_non_zero_real_image_stats() {
     let mut prepared_frame = None;
     let start = std::time::Instant::now();
     while start.elapsed() < std::time::Duration::from_secs(5) {
-        if let Some(msg) = handle.try_recv() {
-            if let WorkerMessage::FrameReady(p) = msg {
-                prepared_frame = Some(*p);
-                break;
-            }
+        if let Some(WorkerMessage::FrameReady(p)) = handle.try_recv() {
+            prepared_frame = Some(*p);
+            break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
