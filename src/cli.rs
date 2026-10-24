@@ -171,8 +171,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, 
             _ => return Err(format!("Unknown or repeated argument: {arg}")),
         }
     }
-    if offset_specified && options.frame.is_none() {
-        return Err("--offset-mm requires --frame.".into());
+    if offset_specified && options.frame.is_none() && !options.scan {
+        return Err("--offset-mm requires --frame or --scan.".into());
     }
     Ok(Some(options))
 }

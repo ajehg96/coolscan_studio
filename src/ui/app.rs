@@ -501,16 +501,19 @@ impl ReviewApp {
                         "Automatic edge detection & border crop",
                     );
 
-                    // Travel offset (disabled until Phase 4 hardware offset integration)
-                    ui.add_enabled_ui(false, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Scanner travel offset (unsupported):");
-                            ui.add(
-                                Slider::new(&mut self.scan_setup.scanner_offset_mm, -5.0..=5.0)
-                                    .step_by(0.1)
-                                    .suffix(" mm"),
-                            );
-                        });
+                    // Travel offset
+                    ui.horizontal(|ui| {
+                        ui.label("Scanner travel offset:");
+                        ui.add(
+                            Slider::new(&mut self.scan_setup.scanner_offset_mm, -5.0..=5.0)
+                                .step_by(0.1)
+                                .suffix(" mm"),
+                        );
+                        if self.scan_setup.scanner_offset_mm.abs() > f64::EPSILON
+                            && ui.button("⟲").on_hover_text("Reset to 0.0 mm").clicked()
+                        {
+                            self.scan_setup.scanner_offset_mm = 0.0;
+                        }
                     });
 
                     // Manual frame selection

@@ -25,7 +25,8 @@ use crate::processing::negadoctor::NegadoctorParams;
 use crate::processing::orientation::Orientation;
 use crate::processing::roll::{PreparedFrame, RollProfile};
 use crate::scanner::types::{
-    FrameArtifact, ScanEvent, ScanMetadata, ScanPhase, ScanRequest, StripDiscovery,
+    FrameArtifact, ScanControl, ScanError, ScanEvent, ScanMetadata, ScanPhase, ScanRequest,
+    StripDiscovery,
 };
 
 /// Commands sent from the UI/main thread to the scanner background worker.
@@ -109,9 +110,24 @@ impl MockScannerBackend {
         }
     }
 
+    /// Returns a realistic LS-40 detected frame rectangle at 2900 DPI for 0-based `frame_idx`.
+    ///
+    /// Frame 1 starts 200 dots (~1.75 mm) from the leading origin (`y = 0`) and Frame 6 ends
+    /// 202 dots (~1.77 mm) from the trailing address limit (`y = 34656`).
+    pub fn detected_rect_for_frame(frame_idx: usize) -> Rect {
+        let top = 200 + (frame_idx as u32) * 6017;
+        Rect {
+            left: 0,
+            right: 2869,
+            top,
+            bottom: top + 4169,
+        }
+    }
+
     fn synthesize_canned_frame(
         &self,
         frame_number: usize,
+        raw_rect: Rect,
         width: usize,
         height: usize,
         roll: &RollProfile,
@@ -173,12 +189,7 @@ impl MockScannerBackend {
             frame_number,
             total_frames: self.frame_count,
             dpi: 2900,
-            raw_rect: Rect {
-                left: 0,
-                right: width as u32,
-                top: 0,
-                bottom: height as u32,
-            },
+            raw_rect,
             samples,
             pass,
             crop: Some(crop),
@@ -242,12 +253,7 @@ impl ScannerBackend for MockScannerBackend {
         }));
 
         let fake_rects = (0..detected_count)
-            .map(|i| Rect {
-                left: 0,
-                right: 500,
-                top: (i * 600) as u32,
-                bottom: ((i + 1) * 600) as u32,
-            })
+            .map(Self::detected_rect_for_frame)
             .collect();
 
         let discovery = StripDiscovery {
@@ -270,6 +276,14 @@ impl ScannerBackend for MockScannerBackend {
         stop_after_current: Arc<AtomicBool>,
         emit: &mut dyn FnMut(WorkerMessage),
     ) {
+        if let Err(e) = request.validate() {
+            emit(WorkerMessage::Error(format!(
+                "Scan failed: {}",
+                ScanError::Request(e)
+            )));
+            return;
+        }
+
         let roll = request
             .roll
             .clone()
@@ -286,17 +300,64 @@ impl ScannerBackend for MockScannerBackend {
         if frame_numbers.is_empty() {
             emit(WorkerMessage::Error(format!(
                 "Scan failed: {}",
-                crate::scanner::types::ScanError::AllFramesFailed
+                ScanError::AllFramesFailed
             )));
             return;
         }
 
+        let scanner_bounds =
+            crate::frame_position::scanner_bounds(0, 0, 2870, 0, 34656, 4332).unwrap();
+        let mut adjusted_rects = Vec::with_capacity(frame_numbers.len());
         for &frame_num in &frame_numbers {
-            if cancel_current.load(Ordering::Relaxed) {
+            let Some(frame_idx) = frame_num.checked_sub(1) else {
+                emit(WorkerMessage::Error(format!(
+                    "Scan failed: {}",
+                    ScanError::FrameUnavailable(frame_num)
+                )));
+                return;
+            };
+            if frame_idx >= self.frame_count {
+                emit(WorkerMessage::Error(format!(
+                    "Scan failed: {}",
+                    ScanError::FrameUnavailable(frame_num)
+                )));
+                return;
+            }
+            let detected = Self::detected_rect_for_frame(frame_idx);
+            match crate::scanner::pipeline::resolve_frame_rect(
+                frame_num,
+                detected,
+                request.offset_mm,
+                2900,
+                scanner_bounds,
+                2870,
+                4332,
+            ) {
+                Ok((adj_rect, offset_dots)) => {
+                    adjusted_rects.push((frame_num, adj_rect, offset_dots));
+                }
+                Err(err) => {
+                    emit(WorkerMessage::Error(format!("Scan failed: {err}")));
+                    return;
+                }
+            }
+        }
+
+        for (frame_num, adj_rect, offset_dots) in adjusted_rects {
+            if cancel_current.swap(false, Ordering::Relaxed) {
                 emit(WorkerMessage::ScanCancelled {
                     reason: format!("Frame {frame_num} cancelled"),
                 });
                 return;
+            }
+
+            if offset_dots != 0 {
+                emit(WorkerMessage::Event(ScanEvent::FrameOffsetApplied {
+                    frame_number: frame_num,
+                    offset_mm: request.offset_mm,
+                    offset_dots,
+                    adjusted_rect: adj_rect,
+                }));
             }
 
             emit(WorkerMessage::Event(ScanEvent::FrameStarted {
@@ -309,11 +370,10 @@ impl ScannerBackend for MockScannerBackend {
 
             // Emit progress steps
             for percent in [25u8, 50, 75, 100] {
-                if cancel_current.load(Ordering::Relaxed) {
+                if cancel_current.swap(false, Ordering::Relaxed) {
                     emit(WorkerMessage::ScanCancelled {
                         reason: format!("Frame {frame_num} cancelled during scan"),
                     });
-                    cancel_current.store(false, Ordering::Relaxed);
                     return;
                 }
                 if self.step_delay > Duration::ZERO {
@@ -329,18 +389,17 @@ impl ScannerBackend for MockScannerBackend {
             }
 
             // Synthesize frame
-            let canned = self.synthesize_canned_frame(frame_num, 40, 60, &roll);
+            let canned = self.synthesize_canned_frame(frame_num, adj_rect, 40, 60, &roll);
             emit(WorkerMessage::FrameReady(Box::new(canned)));
 
             emit(WorkerMessage::Event(ScanEvent::FrameCompleted {
                 frame_number: frame_num,
             }));
 
-            if stop_after_current.load(Ordering::Relaxed) {
+            if stop_after_current.swap(false, Ordering::Relaxed) {
                 emit(WorkerMessage::ScanCancelled {
                     reason: "Stopped after current frame".into(),
                 });
-                stop_after_current.store(false, Ordering::Relaxed);
                 return;
             }
         }
@@ -458,8 +517,8 @@ impl ScannerBackend for HardwareScannerBackend {
     fn scan_strip(
         &mut self,
         request: &ScanRequest,
-        _cancel_current: Arc<AtomicBool>,
-        _stop_after_current: Arc<AtomicBool>,
+        cancel_current: Arc<AtomicBool>,
+        stop_after_current: Arc<AtomicBool>,
         emit: &mut dyn FnMut(WorkerMessage),
     ) {
         let scanners = nkscan::device::list();
@@ -515,11 +574,13 @@ impl ScannerBackend for HardwareScannerBackend {
             }
         };
 
-        let scan_result = crate::scanner::pipeline::scan_strip_with_session(
+        let control = ScanControl::new(cancel_current, stop_after_current);
+        let scan_result = crate::scanner::pipeline::scan_strip_with_control(
             scanner,
             session,
             request,
             None,
+            &control,
             |evt| {
                 emit(WorkerMessage::Event(evt));
             },
@@ -539,13 +600,18 @@ impl ScannerBackend for HardwareScannerBackend {
                         ))),
                     }
                 }
-                if prepared_count > 0 {
+                if let Some(reason) = result.stop_reason {
+                    emit(WorkerMessage::ScanCancelled { reason });
+                } else if prepared_count > 0 {
                     emit(WorkerMessage::StripScanComplete);
                 } else {
                     emit(WorkerMessage::Error(
                         "Scan finished but no frames could be prepared".into(),
                     ));
                 }
+            }
+            Err(ScanError::Cancelled { reason, .. }) => {
+                emit(WorkerMessage::ScanCancelled { reason });
             }
             Err(e) => {
                 emit(WorkerMessage::Error(format!("Scan failed: {e}")));
@@ -885,5 +951,80 @@ mod tests {
             error_received,
             "Expected error when scanning with uncalibrated roll"
         );
+    }
+
+    #[test]
+    fn mock_backend_applies_valid_travel_offset_and_rejects_out_of_bounds() {
+        let handle = ScannerWorkerHandle::spawn_mock(6);
+
+        // 1. Valid +1.5 mm offset on Frame 1 (+171 dots at 2900 DPI)
+        let req_ok =
+            ScanRequest::new(FrameSelection::Specific(1), 2900, 1, false, true).with_offset_mm(1.5);
+        handle.send(ScanCommand::StartScan(Box::new(req_ok)));
+
+        let mut offset_event_dots = None;
+        let mut frame_top = None;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            if let Some(msg) = handle.try_recv() {
+                match msg {
+                    WorkerMessage::Event(ScanEvent::FrameOffsetApplied {
+                        frame_number: 1,
+                        offset_dots,
+                        ..
+                    }) => {
+                        offset_event_dots = Some(offset_dots);
+                    }
+                    WorkerMessage::FrameReady(prepared) => {
+                        frame_top = Some(prepared.source.raw_rect.top);
+                    }
+                    WorkerMessage::StripScanComplete => break,
+                    _ => {}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert_eq!(offset_event_dots, Some(171));
+        assert_eq!(
+            frame_top,
+            Some(MockScannerBackend::detected_rect_for_frame(0).top + 171)
+        );
+
+        // 2. Out-of-bounds negative offset (-3.0 mm) on Frame 1 fails with InvalidOffset
+        let req_f1_err = ScanRequest::new(FrameSelection::Specific(1), 2900, 1, false, true)
+            .with_offset_mm(-3.0);
+        handle.send(ScanCommand::StartScan(Box::new(req_f1_err)));
+
+        let mut f1_err_msg = None;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            if let Some(WorkerMessage::Error(err)) = handle.try_recv() {
+                f1_err_msg = Some(err);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let f1_err_msg = f1_err_msg.expect("Expected error for Frame 1 negative overflow");
+        assert!(f1_err_msg.contains("Invalid travel offset"));
+        assert!(f1_err_msg.contains("frame 1"));
+
+        // 3. Out-of-bounds positive offset (+3.0 mm) on Frame 6 fails with InvalidOffset
+        let req_f6_err =
+            ScanRequest::new(FrameSelection::Specific(6), 2900, 1, false, true).with_offset_mm(3.0);
+        handle.send(ScanCommand::StartScan(Box::new(req_f6_err)));
+
+        let mut f6_err_msg = None;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            if let Some(WorkerMessage::Error(err)) = handle.try_recv() {
+                f6_err_msg = Some(err);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let f6_err_msg = f6_err_msg.expect("Expected error for Frame 6 positive overflow");
+        assert!(f6_err_msg.contains("Invalid travel offset"));
+        assert!(f6_err_msg.contains("frame 6"));
     }
 }

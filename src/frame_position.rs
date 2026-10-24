@@ -9,6 +9,41 @@ pub fn axis_end(start: u32, last: u32, boundary: u32) -> Option<u32> {
     }
 }
 
+/// Computes the scanner address bounds rectangle from axis start, last, and boundary limits.
+pub fn scanner_bounds(
+    x_start: u32,
+    x_last: u32,
+    x_boundary: u32,
+    y_start: u32,
+    y_last: u32,
+    y_boundary: u32,
+) -> Option<Rect> {
+    Some(Rect {
+        left: x_start,
+        right: axis_end(x_start, x_last, x_boundary)?,
+        top: y_start,
+        bottom: axis_end(y_start, y_last, y_boundary)?,
+    })
+}
+
+/// Shifts a detected frame rectangle by `offset_mm` along the film travel axis (Y)
+/// and validates that the resulting rectangle remains within scanner bounds and adapter limits.
+///
+/// Returns `(adjusted_rect, offset_dots)` on success.
+pub fn apply_offset_within(
+    detected: Rect,
+    offset_mm: f64,
+    y_dpi: u16,
+    bounds: Rect,
+    max_width: u32,
+    max_height: u32,
+) -> Result<(Rect, i32), &'static str> {
+    let mut position = FramePosition::new(detected);
+    position.set_offset_mm(offset_mm, y_dpi)?;
+    let adjusted = position.adjusted_within(bounds, max_width, max_height)?;
+    Ok((adjusted, position.offset_dots))
+}
+
 /// An independent shift along film travel, preserving the detected rectangle.
 pub struct FramePosition {
     pub detected: Rect,
@@ -231,5 +266,55 @@ mod tests {
         ] {
             assert_eq!(FramePosition::new(rect).adjusted(), None);
         }
+    }
+
+    #[test]
+    fn ls40_frame_1_and_frame_6_boundary_cases() {
+        let bounds = scanner_bounds(0, 0, 2870, 0, 34656, 4332).unwrap();
+        assert_eq!(
+            bounds,
+            Rect {
+                left: 0,
+                right: 2869,
+                top: 0,
+                bottom: 34656,
+            }
+        );
+
+        // Frame 1 starts near the leading travel origin (top = 90 dots, ~0.79 mm at 2900 DPI)
+        let frame_1 = Rect {
+            left: 0,
+            right: 2869,
+            top: 90,
+            bottom: 4259,
+        };
+        // +0.5 mm (+57 dots) is valid
+        let (adj_1_pos, dots_1_pos) =
+            apply_offset_within(frame_1, 0.5, 2900, bounds, 2870, 4332).unwrap();
+        assert_eq!(dots_1_pos, 57);
+        assert_eq!(adj_1_pos.top, 147);
+        assert_eq!(adj_1_pos.bottom, 4316);
+
+        // -0.78 mm (-89 dots -> top = 1) is right at the boundary and valid
+        let (adj_1_edge, _) =
+            apply_offset_within(frame_1, -0.78, 2900, bounds, 2870, 4332).unwrap();
+        assert_eq!(adj_1_edge.top, 1);
+
+        // -1.0 mm (-114 dots) underflows top = 0 and must be rejected
+        assert!(apply_offset_within(frame_1, -1.0, 2900, bounds, 2870, 4332).is_err());
+
+        // Frame 6 near the trailing travel limit (bottom = 34556, 100 dots from 34656)
+        let frame_6 = Rect {
+            left: 0,
+            right: 2869,
+            top: 30387,
+            bottom: 34556,
+        };
+        // +0.85 mm (+97 dots -> bottom = 34653 <= 34656) is valid
+        let (adj_6_ok, _) = apply_offset_within(frame_6, 0.85, 2900, bounds, 2870, 4332).unwrap();
+        assert_eq!(adj_6_ok.bottom, 34653);
+
+        // +1.0 mm (+114 dots -> bottom = 34670 > 34656) exceeds travel range and must be rejected
+        assert!(apply_offset_within(frame_6, 1.0, 2900, bounds, 2870, 4332).is_err());
     }
 }
