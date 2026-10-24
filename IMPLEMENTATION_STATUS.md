@@ -14,7 +14,7 @@
 | **Exposure & Transport Retry** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Scoped per attempt via `AttemptExposureState`; resets cleanly across retries |
 | **Real Hardware Cancellation** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 4 wires `ScanControl` across all 5 checkpoints & `nkscan` callback |
 | **Stop After Current Frame** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 4 stops cleanly after active frame without inter-frame USB reset |
-| **Per-Frame Streaming Delivery** | ❌ No | ✅ Mock only | ❌ No | N/A | ❌ Blocked | Phase 5 target; hardware currently batches whole strip |
+| **Per-Frame Streaming Delivery** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 5 streams each `FrameArtifact` via `scan_strip_streaming` and reuses `WorkingImage` |
 | **Sparse Frame Numbering** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Preserves `p.source.frame_number` end-to-end; covered by regression tests |
 | **Multi-Sampling Limits (1–16)** | ✅ Yes | ✅ Yes | ⚠️ Hardware unverified >16 | N/A | ⏳ Pending | Core, CLI, and GUI aligned to 1–16 |
 | **Frame Selection & Failure Handling** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Empty manual selection triggers validation; zero frames yields `AllFramesFailed` |
@@ -62,7 +62,12 @@ At the freeze baseline `72514ea`, sparse frame numbering was broken in review/ex
   - [x] 4.3 Enforce `stop_after_current` after frame completion before inter-frame USB refresh
   - [x] 4.4 Wire `HardwareScannerBackend::scan_strip` to `scan_strip_with_control` and emit `WorkerMessage::ScanCancelled`
   - [x] 4.5 Implement and validate `offset_mm` travel offset geometry (`resolve_frame_rect`, `adjust_boundary_table`) and re-enable GUI slider
-- [ ] **Phase 5: Per-Frame Streaming & Memory Architecture (PR 5)**
+- [x] **Phase 5: Per-Frame Streaming & Memory Architecture (PR 5)**
+  - [x] 5.1 Introduce `scan_strip_streaming` and `execute_streaming_frames` for immediate per-frame delivery
+  - [x] 5.2 Free infrared channel memory (`final_samples.ir = None`) immediately after OpenICE cleaning
+  - [x] 5.3 Retain `WorkingImage` in `PreparedFrame::from_artifact` and reuse in `ReviewSession` to eliminate duplicate color conversion
+  - [x] 5.4 Stream `WorkerMessage::FrameReady` per frame from `HardwareScannerBackend::scan_strip`
+  - [x] 5.5 Add regression tests for streaming delivery order, cancellation preservation, and single-conversion color pipeline
 - [ ] **Phase 6: Darktable Parity Fixtures (PR 6)**
 - [ ] **Phase 7: Export Hardening (PR 7)**
 - [x] **Phase 8: GitHub CI Foundation (Workflows created: `ci.yml`, `windows-build.yml`, pinned Rust 1.98.1 toolchain)**

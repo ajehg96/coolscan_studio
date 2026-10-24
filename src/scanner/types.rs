@@ -245,6 +245,21 @@ pub struct StripScanResult {
     pub stop_reason: Option<String>,
 }
 
+/// Summary of a streaming strip scan after frames have been delivered incrementally via callback.
+#[derive(Debug, Clone)]
+pub struct StripSummary {
+    /// Number of frames successfully acquired and emitted via `on_frame`.
+    pub frames_acquired: usize,
+    /// 1-based source frame numbers of the acquired frames in emission order.
+    pub frame_numbers: Vec<usize>,
+    /// Strip discovery metadata.
+    pub discovery: StripDiscovery,
+    /// Associated roll profile if provided.
+    pub roll: Option<RollProfile>,
+    /// Populated when scanning stopped early due to user `stop_after_current`, callback break, or mid-strip cancellation.
+    pub stop_reason: Option<String>,
+}
+
 /// A scanned frame artifact preserving high-bit-depth master samples,
 /// pass geometry, crop decision, and acquisition metadata.
 #[derive(Debug, Clone)]

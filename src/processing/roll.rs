@@ -567,6 +567,9 @@ pub struct PreparedFrame {
     pub params: NegadoctorParams,
     pub technical: TechnicalAnalysis,
     pub highlight_wb_rect: Option<SampleRect>,
+    /// Authoritative linear Rec.2020 working image computed during frame preparation,
+    /// avoiding duplicate LittleCMS 2 color conversion when entering review.
+    pub working_image: Option<WorkingImage>,
 }
 
 impl PreparedFrame {
@@ -586,10 +589,14 @@ impl PreparedFrame {
                 scan_bias: -0.05,
             },
             highlight_wb_rect: None,
+            working_image: None,
         })
     }
 
     /// Prepares a frame by performing technical analysis on the effective cropped image area.
+    ///
+    /// Performs one authoritative scanner-to-working-space color conversion and retains the
+    /// resulting `WorkingImage` for zero-copy reuse in `ReviewSession`.
     ///
     /// Requires that the roll profile contains valid calibration data (D-min).
     pub fn from_artifact(
@@ -624,6 +631,7 @@ impl PreparedFrame {
             params,
             technical,
             highlight_wb_rect: None,
+            working_image: Some(working_image),
         })
     }
 
