@@ -439,15 +439,20 @@ impl ReviewSession {
         let mut frames = Vec::with_capacity(prepared.len());
 
         for p in prepared {
-            let effective = p
-                .source
-                .get_effective_image()
-                .map_err(|e| ColorError::Lcms(e.to_string()))?;
-            let working_image = WorkingImage::from_scanner_samples(
-                effective.samples(),
-                effective.pass(),
-                &color_pipeline,
-            )?;
+            let working_image = match p.working_image {
+                Some(img) => img,
+                None => {
+                    let effective = p
+                        .source
+                        .get_effective_image()
+                        .map_err(|e| ColorError::Lcms(e.to_string()))?;
+                    WorkingImage::from_scanner_samples(
+                        effective.samples(),
+                        effective.pass(),
+                        &color_pipeline,
+                    )?
+                }
+            };
             let mut frame_state =
                 ReviewFrameState::new(p.source.frame_number, working_image, &p.roll, p.technical)?;
             frame_state.orientation = p.orientation;
@@ -466,15 +471,20 @@ impl ReviewSession {
 
     /// Appends a newly scanned prepared frame to this review session.
     pub fn add_prepared_frame(&mut self, p: PreparedFrame) -> Result<usize, ColorError> {
-        let effective = p
-            .source
-            .get_effective_image()
-            .map_err(|e| ColorError::Lcms(e.to_string()))?;
-        let working_image = WorkingImage::from_scanner_samples(
-            effective.samples(),
-            effective.pass(),
-            &self.color_pipeline,
-        )?;
+        let working_image = match p.working_image {
+            Some(img) => img,
+            None => {
+                let effective = p
+                    .source
+                    .get_effective_image()
+                    .map_err(|e| ColorError::Lcms(e.to_string()))?;
+                WorkingImage::from_scanner_samples(
+                    effective.samples(),
+                    effective.pass(),
+                    &self.color_pipeline,
+                )?
+            }
+        };
         let frame_num = p.source.frame_number;
         let mut frame_state =
             ReviewFrameState::new(frame_num, working_image, &p.roll, p.technical)?;
@@ -1050,5 +1060,64 @@ mod tests {
         session.add_prepared_frame(mock_prepared_frame(7)).unwrap();
         assert_eq!(session.frame_count(), 2);
         assert_eq!(session.frames[1].frame_number, 7);
+    }
+
+    struct CountingTransform {
+        inner: ScannerColorPipeline,
+        planar_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::processing::ColorTransform for CountingTransform {
+        fn transform_rgb(&self, rgb: [f32; 3]) -> [f32; 3] {
+            self.inner.transform_rgb(rgb)
+        }
+
+        fn transform_u16_rgb(&self, rgb: [u16; 3]) -> [f32; 3] {
+            self.inner.transform_u16_rgb(rgb)
+        }
+
+        fn transform_u16_slice(&self, src: &[[u16; 3]], dst: &mut [[f32; 3]]) {
+            self.inner.transform_u16_slice(src, dst)
+        }
+
+        fn transform_planar_samples(
+            &self,
+            samples: &nkscan::protocol::decode::Samples,
+            pass: &nkscan::scan::pass::Pass,
+        ) -> Result<Vec<[f32; 3]>, crate::processing::color::ColorError> {
+            self.planar_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.transform_planar_samples(samples, pass)
+        }
+    }
+
+    #[test]
+    fn prepared_frame_color_conversion_occurs_only_once_across_review_ingest() {
+        let counting = CountingTransform {
+            inner: ScannerColorPipeline::default_ls40().unwrap(),
+            planar_calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        let profile = RollProfile::pro_image_100();
+        let artifact = mock_prepared_frame(1).source;
+        let mut prepared = PreparedFrame::from_artifact(artifact, profile, &counting).unwrap();
+        assert_eq!(
+            counting
+                .planar_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "PreparedFrame::from_artifact should perform exactly 1 full-frame color conversion"
+        );
+        assert!(prepared.working_image.is_some());
+        let expected_pixels = prepared.working_image.as_ref().unwrap().pixels.clone();
+
+        // Clear raw scanner samples on `source` so any duplicate `WorkingImage::from_scanner_samples`
+        // call inside `ReviewSession` would fail with `InvalidChannelCount(0)`.
+        prepared.source.samples.colors.clear();
+
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let session = ReviewSession::from_prepared_frames(vec![prepared], pipeline).unwrap();
+        assert_eq!(session.frame_count(), 1);
+        assert_eq!(session.frames[0].working_image.pixels, expected_pixels);
     }
 }

@@ -225,6 +225,7 @@ impl MockScannerBackend {
             params,
             technical: TechnicalAnalysis { dmax, scan_bias },
             highlight_wb_rect: None,
+            working_image: None,
         }
     }
 }
@@ -575,32 +576,38 @@ impl ScannerBackend for HardwareScannerBackend {
         };
 
         let control = ScanControl::new(cancel_current, stop_after_current);
-        let scan_result = crate::scanner::pipeline::scan_strip_with_control(
-            scanner,
-            session,
-            request,
-            None,
-            &control,
-            |evt| {
-                emit(WorkerMessage::Event(evt));
-            },
-        );
-
-        match scan_result {
-            Ok(result) => {
-                let mut prepared_count = 0;
-                for artifact in result.frames {
+        let mut prepared_count = 0usize;
+        let scan_result = {
+            let emit_cell = std::cell::RefCell::new(&mut *emit);
+            crate::scanner::pipeline::scan_strip_streaming(
+                scanner,
+                session,
+                request,
+                None,
+                &control,
+                |evt| {
+                    (emit_cell.borrow_mut())(WorkerMessage::Event(evt));
+                },
+                |artifact| {
                     match PreparedFrame::from_artifact(artifact, roll.clone(), pipeline) {
                         Ok(prepared) => {
                             prepared_count += 1;
-                            emit(WorkerMessage::FrameReady(Box::new(prepared)));
+                            (emit_cell.borrow_mut())(WorkerMessage::FrameReady(Box::new(prepared)));
                         }
-                        Err(e) => emit(WorkerMessage::Error(format!(
-                            "Frame preparation error: {e}"
-                        ))),
+                        Err(e) => {
+                            (emit_cell.borrow_mut())(WorkerMessage::Error(format!(
+                                "Frame preparation error: {e}"
+                            )));
+                        }
                     }
-                }
-                if let Some(reason) = result.stop_reason {
+                    std::ops::ControlFlow::Continue(())
+                },
+            )
+        };
+
+        match scan_result {
+            Ok(summary) => {
+                if let Some(reason) = summary.stop_reason {
                     emit(WorkerMessage::ScanCancelled { reason });
                 } else if prepared_count > 0 {
                     emit(WorkerMessage::StripScanComplete);
