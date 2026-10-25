@@ -73,7 +73,32 @@ cargo test --test hardware_acceptance -- --ignored --test-threads=1 --nocapture
 
 ---
 
-## 4. Evidence Retention
+## 4. Recorded Hardware Acceptance Runs
+
+### Run 1 — Stabilisation Release Candidate (`6d2dfe7`)
+
+```text
+Commit:            6d2dfe7ab277ea9d2770bbf71d17f896646842ff
+Date:              2026-10-25
+Scanner:           Nikon LS-40 ED (usb:PCIROOT(0)#PCI(0103)#PCI(0000)#USBROOT(0)-12)
+Adapter:           SA-21 Strip Film Adapter (Perforation registration, 6 frames @ 2900x2900 optical DPI)
+Windows toolchain: 1.98.1-x86_64-pc-windows-msvc
+WinUSB driver:     Active and verified via `coolscan-studio.exe --diagnose`
+Darktable version: darktable 5.6.0 (`C:\Program Files\darktable\bin\darktable-cli.exe`)
+ICC profile state: Verified (`C:\Users\AJEHG\AppData\Local\darktable\color\in\NKLS4000LS40_N.icc`, 223276 bytes, FNV-1a `0893507334834018`)
+Film strip:        6-frame 35mm negative strip (`starts=[5, 148, 292, 436, 581, 709]`, `length=137`)
+Operator:          Austin + Automated Hardware Acceptance Suite
+```
+
+#### Automated Hardware-in-the-Loop Results (`tests/hardware_acceptance.rs`)
+- [x] `ls40_device_discovery_and_status` — **PASS** (`15.47s`): Connected via USB, discovered 6 frames via perforation registration (`DPI: (2900, 2900)`).
+- [x] `ls40_single_frame_725_dpi_streaming_and_export` — **PASS** (`81.52s`): Acquired Frame 1 (`1082x717 @ 725 DPI`), streamed immediately via `on_frame`, prepared `PreparedFrame`, and exported `frame-1-master.tif` (with embedded ICC Tag 34675), `frame-1.tif`, and `frame-1.tif.xmp`.
+- [x] `ls40_cancel_current_frame_and_recover` — **PASS** (`111.77s`): Aborted Frame 1 mid-pass via `ScanControl::request_cancel_current()`, returned `Err(ScanError::Cancelled)` without entering USB retry loops, and immediately completed a follow-up recovery scan on the same scanner without power-cycling.
+- [x] `ls40_stop_after_current_frame_multi_frame` — **PASS** (`72.64s`): Requested `stop_after_current` inside the `on_frame` streaming callback upon Frame 1 completion during a `[1, 2]` scan; preserved Frame 1 (`frames_acquired == 1`) and halted before Frame 2.
+
+---
+
+## 5. Evidence Retention
 
 For each hardware acceptance run, archive outside the public source tree (or attach to the GitHub Release / PR notes):
 1. Output of `coolscan-studio --diagnose`
