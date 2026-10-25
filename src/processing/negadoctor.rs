@@ -1,6 +1,8 @@
 //! Negadoctor negative inversion and print tone reproduction mathematics.
 //!
-//! Ported directly from Darktable's `src/iop/negadoctor.c`.
+//! Implements the mathematical equations and `dt_iop_negadoctor_params_t` parameter
+//! model defined by Darktable's `negadoctor` module (modversion 2) for interoperable
+//! sidecar generation and preview rendering.
 //! This module contains no scanner code, no GUI code, and no disk I/O.
 //! It operates exclusively in floating-point linear working colour space
 //! (e.g. Linear Rec.2020).

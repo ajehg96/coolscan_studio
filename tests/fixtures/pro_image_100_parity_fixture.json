@@ -1,0 +1,321 @@
+{
+  "darktable_version": "5.6.0",
+  "scanner_model": "Nikon COOLSCAN IV ED (LS-40 ED)",
+  "film_stock": "Kodak Pro Image 100",
+  "frame_number": 4,
+  "source_dimensions": [
+    3984,
+    2656
+  ],
+  "crop_bounds_inset_rect": {
+    "x": 232,
+    "y": 232,
+    "width": 3520,
+    "height": 2192
+  },
+  "wb_picker_rect_in_source": {
+    "x": 1764,
+    "y": 1204,
+    "width": 32,
+    "height": 32
+  },
+  "wb_picker_rect_in_fixture": {
+    "x": 0,
+    "y": 0,
+    "width": 32,
+    "height": 32
+  },
+  "fixture_dimensions": [
+    36,
+    32
+  ],
+  "dmin": [
+    0.89649993,
+    0.9092999,
+    0.8815999
+  ],
+  "full_fixture_stats": {
+    "min": [
+      0.03881299,
+      0.028796919,
+      0.018278645
+    ],
+    "max": [
+      0.9126878,
+      0.9357299,
+      0.94663924
+    ],
+    "mean": [
+      0.11858046,
+      0.10818166,
+      0.08725027
+    ],
+    "count": 1152
+  },
+  "wb_patch_stats": {
+    "min": [
+      0.07028479,
+      0.058759857,
+      0.038418617
+    ],
+    "max": [
+      0.109829,
+      0.09540866,
+      0.07566469
+    ],
+    "mean": [
+      0.08661582,
+      0.075069286,
+      0.05349866
+    ],
+    "count": 1024
+  },
+  "darktable_reference": {
+    "dmax": 1.6831377,
+    "scan_bias": -0.021572074,
+    "wb_high": [
+      1.1922328,
+      1.119533,
+      1.0
+    ],
+    "wb_low": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "paper_black": 0.100000024,
+    "paper_grade": 4.0,
+    "paper_gloss": 0.75,
+    "print_exposure_manual": 1.0,
+    "print_exposure_auto": 0.95604163
+  },
+  "tolerances": {
+    "icc_linear_rec2020": 0.0001,
+    "picker_stats": 0.00001,
+    "dmax": 0.00025,
+    "scan_bias": 0.0035,
+    "wb_high": 0.001,
+    "paper_black": 0.00001,
+    "print_exposure": 0.0001,
+    "rendered_linear_rgb": 0.0005,
+    "rendered_srgb_u8": 1
+  },
+  "reference_pixels": [
+    {
+      "name": "min_r",
+      "source_coord": [
+        2573,
+        1038
+      ],
+      "scanner_u16": [
+        3217,
+        1984,
+        1488
+      ],
+      "linear_rec2020": [
+        0.03913963,
+        0.030894289,
+        0.019830389
+      ],
+      "rendered_linear_rgb": [
+        0.90419686,
+        0.9084141,
+        0.90825355
+      ],
+      "rendered_srgb_u8": [
+        244,
+        245,
+        244
+      ]
+    },
+    {
+      "name": "min_g",
+      "source_coord": [
+        2574,
+        1037
+      ],
+      "scanner_u16": [
+        3249,
+        1888,
+        1584
+      ],
+      "linear_rec2020": [
+        0.03881299,
+        0.028796919,
+        0.021559887
+      ],
+      "rendered_linear_rgb": [
+        0.9051167,
+        0.9149012,
+        0.90053356
+      ],
+      "rendered_srgb_u8": [
+        243,
+        245,
+        243
+      ]
+    },
+    {
+      "name": "min_b",
+      "source_coord": [
+        2575,
+        1035
+      ],
+      "scanner_u16": [
+        3441,
+        1952,
+        1392
+      ],
+      "linear_rec2020": [
+        0.04049606,
+        0.030450627,
+        0.018278645
+      ],
+      "rendered_linear_rgb": [
+        0.90032434,
+        0.909806,
+        0.9149736
+      ],
+      "rendered_srgb_u8": [
+        243,
+        245,
+        245
+      ]
+    },
+    {
+      "name": "max_r",
+      "source_coord": [
+        3717,
+        701
+      ],
+      "scanner_u16": [
+        61966,
+        57453,
+        51804
+      ],
+      "linear_rec2020": [
+        0.9126878,
+        0.8802321,
+        0.7868198
+      ],
+      "rendered_linear_rgb": [
+        0.00044790053,
+        0.00092324975,
+        0.0019684266
+      ],
+      "rendered_srgb_u8": [
+        0,
+        3,
+        7
+      ]
+    },
+    {
+      "name": "max_g",
+      "source_coord": [
+        495,
+        234
+      ],
+      "scanner_u16": [
+        52956,
+        62782,
+        58413
+      ],
+      "linear_rec2020": [
+        0.8885499,
+        0.9357299,
+        0.9072076
+      ],
+      "rendered_linear_rgb": [
+        0.00071336475,
+        0.00034100979,
+        0.00030481466
+      ],
+      "rendered_srgb_u8": [
+        3,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "max_b",
+      "source_coord": [
+        3367,
+        720
+      ],
+      "scanner_u16": [
+        51708,
+        56637,
+        63727
+      ],
+      "linear_rec2020": [
+        0.8329035,
+        0.8593535,
+        0.94663924
+      ],
+      "rendered_linear_rgb": [
+        0.0017787289,
+        0.0012753448,
+        0.00013282518
+      ],
+      "rendered_srgb_u8": [
+        7,
+        4,
+        0
+      ]
+    },
+    {
+      "name": "midtone",
+      "source_coord": [
+        1992,
+        1328
+      ],
+      "scanner_u16": [
+        6706,
+        4657,
+        3089
+      ],
+      "linear_rec2020": [
+        0.08819832,
+        0.07217471,
+        0.044508543
+      ],
+      "rendered_linear_rgb": [
+        0.70908356,
+        0.7308995,
+        0.77474475
+      ],
+      "rendered_srgb_u8": [
+        217,
+        222,
+        229
+      ]
+    },
+    {
+      "name": "shadow",
+      "source_coord": [
+        1200,
+        800
+      ],
+      "scanner_u16": [
+        10626,
+        9618,
+        7490
+      ],
+      "linear_rec2020": [
+        0.15359208,
+        0.14701341,
+        0.113261275
+      ],
+      "rendered_linear_rgb": [
+        0.4742979,
+        0.4488125,
+        0.44957885
+      ],
+      "rendered_srgb_u8": [
+        186,
+        178,
+        179
+      ]
+    }
+  ]
+}

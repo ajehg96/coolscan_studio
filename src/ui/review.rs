@@ -628,6 +628,9 @@ impl ReviewSession {
     }
 
     /// Saves the Darktable XMP sidecar for the current frame to the specified directory.
+    ///
+    /// Verifies (or provisions) `NKLS4000LS40_N.icc` in Darktable's input profile directory
+    /// before writing the sidecar so that a broken XMP reference is never silently emitted.
     pub fn save_current_xmp(
         &self,
         output_dir: &std::path::Path,
@@ -635,6 +638,14 @@ impl ReviewSession {
         let frame = self
             .current_frame()
             .ok_or_else(|| DarktableError::MissingHistoryItem("No active frame".into()))?;
+        if !output_dir.exists() {
+            std::fs::create_dir_all(output_dir).map_err(|e| {
+                DarktableError::IoError(format!("Failed to create output directory: {e}"))
+            })?;
+        }
+        crate::diagnostics::ensure_darktable_icc_for_export(output_dir, None)
+            .map_err(DarktableError::InvalidParamValue)?;
+
         let xmp = self.current_darktable_xmp().ok_or_else(|| {
             DarktableError::MissingHistoryItem(format!(
                 "Could not generate XMP for frame: roll '{}' is uncalibrated or frame missing",
@@ -646,7 +657,25 @@ impl ReviewSession {
         Ok(path)
     }
 
-    /// Saves both the TIFF image (cropped if applicable) and the Darktable XMP sidecar.
+    /// Saves the untouched, uncropped 16-bit scanner master TIFF (`frame-<N>-master.tif`)
+    /// with the embedded Nikon LS-40 ICC profile.
+    pub fn save_current_master_tiff(
+        &self,
+        output_dir: &std::path::Path,
+    ) -> Result<std::path::PathBuf, String> {
+        let frame = self
+            .current_frame()
+            .ok_or_else(|| "No active frame".to_string())?;
+        let artifact = frame
+            .source_artifact
+            .as_ref()
+            .ok_or_else(|| "No source scanner artifact retained on frame".to_string())?;
+        let saved = crate::output::save_master_tiff(artifact, output_dir, true)
+            .map_err(|e| e.to_string())?;
+        Ok(saved.path)
+    }
+
+    /// Saves both the working TIFF image (cropped if applicable) and the Darktable XMP sidecar.
     pub fn save_current_frame_and_xmp(
         &self,
         output_dir: &std::path::Path,
@@ -659,7 +688,7 @@ impl ReviewSession {
         }
         let tiff_path = output_dir.join(format!("frame-{}.tif", frame.frame_number));
 
-        // Save TIFF if source artifact is present
+        // Save working TIFF if source artifact is present
         if let Some(artifact) = &frame.source_artifact {
             let effective = artifact.get_effective_image().map_err(|e| e.to_string())?;
             let path_str = tiff_path.to_str().ok_or("Invalid TIFF path string")?;
@@ -678,6 +707,17 @@ impl ReviewSession {
             .map_err(|e| e.to_string())?;
 
         Ok((tiff_path, xmp_path))
+    }
+
+    /// Saves the complete archival & Darktable bundle for the current frame:
+    /// `(frame-<N>-master.tif, frame-<N>.tif, frame-<N>.tif.xmp)`.
+    pub fn save_current_complete_bundle(
+        &self,
+        output_dir: &std::path::Path,
+    ) -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf), String> {
+        let master_path = self.save_current_master_tiff(output_dir)?;
+        let (working_path, xmp_path) = self.save_current_frame_and_xmp(output_dir)?;
+        Ok((master_path, working_path, xmp_path))
     }
 }
 

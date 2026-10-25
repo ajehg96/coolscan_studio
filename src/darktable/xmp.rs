@@ -12,10 +12,12 @@
 //! `gz<factor><base64>` deflate format.
 
 use base64::prelude::*;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::reader::Reader;
+use quick_xml::writer::Writer;
 use std::fmt::Write as FmtWrite;
 use std::fs;
+use std::io::Cursor;
 use std::path::Path;
 
 use crate::processing::negadoctor::NegadoctorParams;
@@ -573,99 +575,101 @@ impl DarktableXmp {
         self.history.iter().rfind(|h| h.operation == operation)
     }
 
-    /// Serializes this document to Darktable XMP XML.
+    /// Serializes this document to Darktable XMP XML using `quick-xml`'s writer
+    /// so all attribute values (such as `DerivedFrom` filenames containing `&`, `"`, `<`, `>`, or Unicode)
+    /// are XML-escaped safely.
     pub fn to_xmp_string(&self) -> String {
-        let mut out = String::with_capacity(4096);
-        out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        out.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"XMP Core 4.4.0-Exiv2\">\n");
-        out.push_str(" <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
-        out.push_str("  <rdf:Description rdf:about=\"\"\n");
-        out.push_str("    xmlns:exif=\"http://ns.adobe.com/exif/1.0/\"\n");
-        out.push_str("    xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\"\n");
-        out.push_str("    xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n");
-        out.push_str("    xmlns:darktable=\"http://darktable.sf.net/\"\n");
-        out.push_str("    xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n");
-        out.push_str("    xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"\n");
-        out.push_str("   exif:DateTimeOriginal=\"\"\n");
-        let _ = writeln!(out, "   xmpMM:DerivedFrom=\"{}\"", self.derived_from);
-        out.push_str("   xmp:Rating=\"1\"\n");
-        let _ = writeln!(
-            out,
-            "   darktable:import_timestamp=\"{}\"",
-            10000000000000000u64
-        );
-        let _ = writeln!(
-            out,
-            "   darktable:change_timestamp=\"{}\"",
-            10000000000000000u64
-        );
-        out.push_str("   darktable:export_timestamp=\"-1\"\n");
-        out.push_str("   darktable:print_timestamp=\"-1\"\n");
-        let _ = writeln!(out, "   darktable:xmp_version=\"{}\"", self.xmp_version);
-        let _ = writeln!(out, "   darktable:raw_params=\"{}\"", self.raw_params);
-        let _ = writeln!(
-            out,
-            "   darktable:auto_presets_applied=\"{}\"",
-            self.auto_presets_applied
-        );
-        let _ = writeln!(out, "   darktable:history_end=\"{}\"", self.history_end);
-        let _ = writeln!(
-            out,
-            "   darktable:iop_order_version=\"{}\"",
-            self.iop_order_version
-        );
+        let mut writer = Writer::new_with_indent(Cursor::new(Vec::with_capacity(4096)), b' ', 1);
+
+        let _ = writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)));
+
+        let mut xmpmeta = BytesStart::new("x:xmpmeta");
+        xmpmeta.push_attribute(("xmlns:x", "adobe:ns:meta/"));
+        xmpmeta.push_attribute(("x:xmptk", "XMP Core 4.4.0-Exiv2"));
+        let _ = writer.write_event(Event::Start(xmpmeta));
+
+        let mut rdf = BytesStart::new("rdf:RDF");
+        rdf.push_attribute(("xmlns:rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"));
+        let _ = writer.write_event(Event::Start(rdf));
+
+        let mut desc = BytesStart::new("rdf:Description");
+        desc.push_attribute(("rdf:about", ""));
+        desc.push_attribute(("xmlns:exif", "http://ns.adobe.com/exif/1.0/"));
+        desc.push_attribute(("xmlns:xmpMM", "http://ns.adobe.com/xap/1.0/mm/"));
+        desc.push_attribute(("xmlns:xmp", "http://ns.adobe.com/xap/1.0/"));
+        desc.push_attribute(("xmlns:darktable", "http://darktable.sf.net/"));
+        desc.push_attribute(("xmlns:dc", "http://purl.org/dc/elements/1.1/"));
+        desc.push_attribute(("xmlns:lr", "http://ns.adobe.com/lightroom/1.0/"));
+        desc.push_attribute(("exif:DateTimeOriginal", ""));
+        desc.push_attribute(("xmpMM:DerivedFrom", self.derived_from.as_str()));
+        desc.push_attribute(("xmp:Rating", "1"));
+        desc.push_attribute(("darktable:import_timestamp", "10000000000000000"));
+        desc.push_attribute(("darktable:change_timestamp", "10000000000000000"));
+        desc.push_attribute(("darktable:export_timestamp", "-1"));
+        desc.push_attribute(("darktable:print_timestamp", "-1"));
+
+        let xmp_version_s = self.xmp_version.to_string();
+        let raw_params_s = self.raw_params.to_string();
+        let auto_presets_s = self.auto_presets_applied.to_string();
+        let history_end_s = self.history_end.to_string();
+        let iop_order_s = self.iop_order_version.to_string();
+
+        desc.push_attribute(("darktable:xmp_version", xmp_version_s.as_str()));
+        desc.push_attribute(("darktable:raw_params", raw_params_s.as_str()));
+        desc.push_attribute(("darktable:auto_presets_applied", auto_presets_s.as_str()));
+        desc.push_attribute(("darktable:history_end", history_end_s.as_str()));
+        desc.push_attribute(("darktable:iop_order_version", iop_order_s.as_str()));
 
         if let Some(h) = &self.history_basic_hash {
-            let _ = writeln!(out, "   darktable:history_basic_hash=\"{h}\"");
+            desc.push_attribute(("darktable:history_basic_hash", h.as_str()));
         }
         if let Some(h) = &self.history_current_hash {
-            let _ = writeln!(out, "   darktable:history_current_hash=\"{h}\"");
+            desc.push_attribute(("darktable:history_current_hash", h.as_str()));
         }
 
-        out.push_str(">\n");
-        out.push_str("   <darktable:masks_history>\n");
-        out.push_str("    <rdf:Seq/>\n");
-        out.push_str("   </darktable:masks_history>\n");
-        out.push_str("   <darktable:history>\n");
-        out.push_str("    <rdf:Seq>\n");
+        let _ = writer.write_event(Event::Start(desc));
+
+        // <darktable:masks_history><rdf:Seq/></darktable:masks_history>
+        let _ = writer.write_event(Event::Start(BytesStart::new("darktable:masks_history")));
+        let _ = writer.write_event(Event::Empty(BytesStart::new("rdf:Seq")));
+        let _ = writer.write_event(Event::End(BytesEnd::new("darktable:masks_history")));
+
+        // <darktable:history><rdf:Seq>...</rdf:Seq></darktable:history>
+        let _ = writer.write_event(Event::Start(BytesStart::new("darktable:history")));
+        let _ = writer.write_event(Event::Start(BytesStart::new("rdf:Seq")));
 
         for item in &self.history {
             let enabled_str = if item.enabled { "1" } else { "0" };
-            let _ = writeln!(out, "     <rdf:li");
-            let _ = writeln!(out, "      darktable:num=\"{}\"", item.num);
-            let _ = writeln!(out, "      darktable:operation=\"{}\"", item.operation);
-            let _ = writeln!(out, "      darktable:enabled=\"{}\"", enabled_str);
-            let _ = writeln!(out, "      darktable:modversion=\"{}\"", item.modversion);
-            let _ = writeln!(out, "      darktable:params=\"{}\"", item.params);
-            let _ = writeln!(out, "      darktable:multi_name=\"{}\"", item.multi_name);
-            let _ = writeln!(
-                out,
-                "      darktable:multi_name_hand_edited=\"{}\"",
-                item.multi_name_hand_edited
-            );
-            let _ = writeln!(
-                out,
-                "      darktable:multi_priority=\"{}\"",
-                item.multi_priority
-            );
-            let _ = writeln!(
-                out,
-                "      darktable:blendop_version=\"{}\"",
-                item.blendop_version
-            );
-            let _ = writeln!(
-                out,
-                "      darktable:blendop_params=\"{}\"/>",
-                item.blendop_params
-            );
+            let num_s = item.num.to_string();
+            let modversion_s = item.modversion.to_string();
+            let hand_edited_s = item.multi_name_hand_edited.to_string();
+            let priority_s = item.multi_priority.to_string();
+            let blendop_ver_s = item.blendop_version.to_string();
+
+            let mut li = BytesStart::new("rdf:li");
+            li.push_attribute(("darktable:num", num_s.as_str()));
+            li.push_attribute(("darktable:operation", item.operation.as_str()));
+            li.push_attribute(("darktable:enabled", enabled_str));
+            li.push_attribute(("darktable:modversion", modversion_s.as_str()));
+            li.push_attribute(("darktable:params", item.params.as_str()));
+            li.push_attribute(("darktable:multi_name", item.multi_name.as_str()));
+            li.push_attribute(("darktable:multi_name_hand_edited", hand_edited_s.as_str()));
+            li.push_attribute(("darktable:multi_priority", priority_s.as_str()));
+            li.push_attribute(("darktable:blendop_version", blendop_ver_s.as_str()));
+            li.push_attribute(("darktable:blendop_params", item.blendop_params.as_str()));
+            let _ = writer.write_event(Event::Empty(li));
         }
 
-        out.push_str("    </rdf:Seq>\n");
-        out.push_str("   </darktable:history>\n");
-        out.push_str("  </rdf:Description>\n");
-        out.push_str(" </rdf:RDF>\n");
-        out.push_str("</x:xmpmeta>\n");
+        let _ = writer.write_event(Event::End(BytesEnd::new("rdf:Seq")));
+        let _ = writer.write_event(Event::End(BytesEnd::new("darktable:history")));
+        let _ = writer.write_event(Event::End(BytesEnd::new("rdf:Description")));
+        let _ = writer.write_event(Event::End(BytesEnd::new("rdf:RDF")));
+        let _ = writer.write_event(Event::End(BytesEnd::new("x:xmpmeta")));
 
+        let mut out = String::from_utf8(writer.into_inner().into_inner()).unwrap_or_default();
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
         out
     }
 
@@ -703,7 +707,14 @@ impl DarktableXmp {
                                 DarktableError::XmlParseError(format!("Attribute error: {err}"))
                             })?;
                             let local = attr.key.local_name();
-                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            let val = attr
+                                .normalized_value(quick_xml::XmlVersion::Explicit1_0)
+                                .map_err(|err| {
+                                    DarktableError::XmlParseError(format!(
+                                        "Attribute unescape error: {err}"
+                                    ))
+                                })?
+                                .into_owned();
 
                             if local.as_ref() == b"DerivedFrom" {
                                 derived_from = val;
@@ -741,7 +752,14 @@ impl DarktableXmp {
                                 DarktableError::XmlParseError(format!("Attribute error: {err}"))
                             })?;
                             let local = attr.key.local_name();
-                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            let val = attr
+                                .normalized_value(quick_xml::XmlVersion::Explicit1_0)
+                                .map_err(|err| {
+                                    DarktableError::XmlParseError(format!(
+                                        "Attribute unescape error: {err}"
+                                    ))
+                                })?
+                                .into_owned();
 
                             if local.as_ref() == b"operation" {
                                 operation = val;
@@ -1018,6 +1036,42 @@ mod tests {
 
         let extracted_profile = reparsed.extract_colorin_profile().unwrap();
         assert_eq!(extracted_profile, "NKLS4000LS40_N.icc");
+    }
+
+    #[test]
+    fn xmp_writer_escapes_reserved_xml_characters_and_unicode_filenames() {
+        let negadoctor = NegadoctorParams::default();
+        let tricky_filenames = [
+            "B&W & Color_frame-1.tif",
+            "roll \"A\" 'quote' frame-2.tif",
+            "angle <brackets> & \"quotes\" frame-3.tif",
+            "København_夏_ロール01_frame-4.tif",
+        ];
+
+        for &filename in &tricky_filenames {
+            let mut xmp = DarktableXmp::for_frame(
+                filename,
+                "NKLS4000LS40_N.icc",
+                &negadoctor,
+                Orientation::Rotate180,
+            )
+            .unwrap();
+            // Also test custom multi_name with special characters
+            xmp.history[4].multi_name = "scanner & \"ICC\" <profile>".into();
+
+            let xml_str = xmp.to_xmp_string();
+            let reparsed = DarktableXmp::parse(&xml_str).unwrap();
+            assert_eq!(
+                reparsed.derived_from, filename,
+                "Filename should round-trip identically after XML escaping/unescaping"
+            );
+            assert_eq!(
+                reparsed.history[4].multi_name,
+                "scanner & \"ICC\" <profile>"
+            );
+            assert_eq!(reparsed.extract_orientation(), Orientation::Rotate180);
+            assert_eq!(reparsed.extract_negadoctor_params().unwrap(), negadoctor);
+        }
     }
 
     #[test]
