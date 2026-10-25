@@ -19,8 +19,12 @@ env:
 
 jobs:
   parity:
-    name: Darktable 5.6 parity & export verification
-    runs-on: ubuntu-latest
+    name: Darktable 5.6 parity & export verification (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout
@@ -34,3 +38,6 @@ jobs:
 
       - name: Run Darktable parity & export hardening fixture suite
         run: cargo test --test darktable_parity --locked -- --nocapture
+
+      - name: Run Darktable XMP codec & escaping unit tests
+        run: cargo test darktable::xmp::tests:: --locked -- --nocapture

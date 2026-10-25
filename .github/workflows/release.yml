@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    name: Windows Release Bundle (x86_64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --all-targets --all-features --locked
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Stage release bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          New-Item -ItemType Directory -Force dist/profiles | Out-Null
+          New-Item -ItemType Directory -Force dist/docs | Out-Null
+          Copy-Item target/release/coolscan-studio.exe dist/
+          Copy-Item README.md dist/
+          Copy-Item NOTICES.md dist/
+          Copy-Item profiles/README.md dist/profiles/
+          Copy-Item profiles/NKLS4000LS40_N.icc dist/profiles/
+          Copy-Item docs/HARDWARE_ACCEPTANCE.md dist/docs/
+          Copy-Item LICENSE* dist/ -ErrorAction SilentlyContinue
+
+      - name: Create ZIP archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/* -DestinationPath coolscan-studio-windows-x64.zip -Force
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash coolscan-studio-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  coolscan-studio-windows-x64.zip" | Out-File -Encoding ascii coolscan-studio-windows-x64.zip.sha256
+
+      - name: Upload release workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: |
+            coolscan-studio-windows-x64.zip
+            coolscan-studio-windows-x64.zip.sha256
+          if-no-files-found: error

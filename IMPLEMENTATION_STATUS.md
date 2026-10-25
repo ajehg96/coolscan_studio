@@ -80,6 +80,16 @@ At the freeze baseline `72514ea`, sparse frame numbering was broken in review/ex
   - [x] 7.3 Formalize Scanner Master TIFF (`frame-<N>-master.tif`, uncropped 16-bit with embedded ICC Tag 34675) vs Working TIFF (`frame-<N>.tif`, cropped 16-bit paired with `.tif.xmp`) and `read_tiff` parser
   - [x] 7.4 Reconcile Nikon ICC profile license carve-out and Darktable mathematical specification provenance in `NOTICES.md` and `profiles/README.md`
   - [x] 7.5 Add `.github/workflows/darktable-parity.yml` CI workflow
-- [x] **Phase 8: GitHub CI Foundation (Workflows created: `ci.yml`, `windows-build.yml`, pinned Rust 1.98.1 toolchain)**
-- [ ] **Phase 9: Hardware Acceptance Gate (PR 9)**
-- [ ] **Phase 10: Release CI & Packaging (PR 10)**
+- [x] **Phase 8: GitHub CI Foundation (PR 8)**
+  - [x] 8.1 Core Linux CI workflow (`.github/workflows/ci.yml`: `Rustfmt`, `Clippy`, `Unit & integration tests`, `Documentation build`)
+  - [x] 8.2 Windows x86_64 CI workflow (`.github/workflows/windows-build.yml`: tests, Clippy, release executable artifact upload)
+  - [x] 8.3 Cross-platform Darktable 5.6.0 parity CI workflow (`.github/workflows/darktable-parity.yml` on `ubuntu-latest` and `windows-latest`)
+  - [x] 8.4 Dependabot configuration (`.github/dependabot.yml` for `cargo` and `github-actions`)
+  - [x] 8.5 Hardware-ignored test seam (`tests/hardware_acceptance.rs` with `#[ignore = "requires Nikon LS-40 hardware"]`)
+- [ ] **Phase 9: Hardware Acceptance Gate (`docs/HARDWARE_ACCEPTANCE.md` & `tests/hardware_acceptance.rs`)**
+  - [x] 9.1 Create `docs/HARDWARE_ACCEPTANCE.md` runbook, checklist, and release-candidate hardware record template
+  - [x] 9.2 Implement `#[ignore = "requires Nikon LS-40 hardware"]` acceptance suite (`ls40_device_discovery_and_status`, `ls40_single_frame_725_dpi_streaming_and_export`, `ls40_cancel_current_frame_and_recover`, `ls40_stop_after_current_frame_multi_frame`)
+  - [ ] 9.3 Execute physical Nikon LS-40 hardware acceptance run and record tested commit SHA
+- [x] **Phase 10: Release CI & Packaging Preparation**
+  - [x] 10.1 Add reproducible Windows release workflow (`.github/workflows/release.yml`: stages binary, `README.md`, `NOTICES.md`, `profiles/`, `docs/`, creates `.zip` + `.sha256`)
+  - [x] 10.2 Reconcile `Cargo.toml` repository metadata (`https://github.com/ajehg96/coolscan_studio`) and create `README.md`
