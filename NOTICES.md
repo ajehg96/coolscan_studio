@@ -5,7 +5,7 @@
 - **Name:** Coolscan Studio
 - **Version:** 0.1.0
 - **License:** MIT OR Apache-2.0
-- **Repository:** https://github.com/activexray/coolscan-studio
+- **Repository:** https://github.com/ajehg96/coolscan_studio
 
 Coolscan Studio is a post-scan review studio and scanner controller designed specifically for Nikon Coolscan film scanners (LS-40 ED / IV ED, LS-50 ED / V ED, LS-4000 ED, LS-5000 ED), featuring direct Darktable Negadoctor mathematical compatibility.
 
@@ -40,7 +40,7 @@ Coolscan Studio utilizes LittleCMS 2 for ICC color management, including convert
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the standard MIT conditions.
 
-### 2. Darktable Compatibility & Mathematical Specification Notice
+### 2. Darktable Compatibility Notice (Mathematical Specification)
 
 Coolscan Studio implements the mathematical equations and binary parameter structures specified by Darktable's **Negadoctor** (`negadoctor` modversion 2) color film negative inversion module and **Colorin** (`colorin` modversion 7) input profile module for interoperability with Darktable 5.x.
 
