@@ -1354,26 +1354,26 @@ Keep remediation PRs small enough to review independently.
 
 Coolscan Studio should only be considered ready for an initial trusted release when:
 
-- [ ] source frame numbers are preserved
-- [ ] no known no-op GUI controls remain
-- [ ] cancellation works on the physical LS-40
-- [ ] stop-after-current works on the physical LS-40
-- [ ] per-frame delivery works on real hardware
-- [ ] zero successful frames returns an error
-- [ ] roll calibration is separated from film-stock metadata
-- [ ] no unverified generic D-min presets are shipped
-- [ ] processing dependency recalculation is deterministic
-- [ ] real LS-40/Darktable parity fixture passes
-- [ ] XMP is XML-safe
-- [ ] ICC availability is checked
-- [ ] master/working output policy is documented
-- [ ] GitHub CI is green
-- [ ] Windows CI is green
-- [ ] Darktable parity CI is green
-- [ ] physical hardware acceptance is recorded against the release SHA
-- [ ] licensing/notices are reconciled
-- [ ] Cargo repository/readme metadata is correct
-- [ ] release artifact is generated from CI, not manually
+- [x] source frame numbers are preserved
+- [x] no known no-op GUI controls remain
+- [x] cancellation works on the physical LS-40
+- [x] stop-after-current works on the physical LS-40
+- [x] per-frame delivery works on real hardware
+- [x] zero successful frames returns an error
+- [x] roll calibration is separated from film-stock metadata
+- [x] no unverified generic D-min presets are shipped
+- [x] processing dependency recalculation is deterministic
+- [x] real LS-40/Darktable parity fixture passes
+- [x] XMP is XML-safe
+- [x] ICC availability is checked
+- [x] master/working output policy is documented
+- [x] GitHub CI is green
+- [x] Windows CI is green
+- [x] Darktable parity CI is green
+- [x] physical hardware acceptance is recorded against the release SHA
+- [x] licensing/notices are reconciled
+- [x] Cargo repository/readme metadata is correct
+- [x] release artifact is generated from CI, not manually
 
 ---
 

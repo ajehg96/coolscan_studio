@@ -10,21 +10,21 @@
 
 | Subsystem / Feature | Implemented | Mock Validated | Hardware Tested | DT Parity Tested | Release Ready | Notes |
 |---|---|---|---|---|---|---|
-| **Discovery & Framing** | ✅ Yes | ✅ Yes | ⚠️ Partial (Phase 1-8) | N/A | ⏳ Pending | Frame bounds detection and validated travel offset (`offset_mm`) active |
-| **Exposure & Transport Retry** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Scoped per attempt via `AttemptExposureState`; resets cleanly across retries |
-| **Real Hardware Cancellation** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 4 wires `ScanControl` across all 5 checkpoints & `nkscan` callback |
-| **Stop After Current Frame** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 4 stops cleanly after active frame without inter-frame USB reset |
-| **Per-Frame Streaming Delivery** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Phase 5 streams each `FrameArtifact` via `scan_strip_streaming` and reuses `WorkingImage` |
-| **Sparse Frame Numbering** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Preserves `p.source.frame_number` end-to-end; covered by regression tests |
-| **Multi-Sampling Limits (1–16)** | ✅ Yes | ✅ Yes | ⚠️ Hardware unverified >16 | N/A | ⏳ Pending | Core, CLI, and GUI aligned to 1–16 |
-| **Frame Selection & Failure Handling** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Empty manual selection triggers validation; zero frames yields `AllFramesFailed` |
-| **Roll vs Stock Calibration** | ✅ Yes | ✅ Yes | ⚠️ Measured ProImage only | ✅ Guarded uncalibrated | ⏳ Pending | Phase 2 separates `FilmStock` from `RollCalibration` (Schema v2); unverified D-min defaults removed |
-| **Negadoctor Math & Inversion** | ✅ Yes | ✅ Yes | N/A | ✅ Darktable 5.6 fixture | ⏳ Pending | Phase 6 verifies Stages A–D against real LS-40 Kodak Pro Image 100 + Darktable 5.6.0 |
-| **Processing Dependency Graph** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 3 enforces deterministic Auto/Manual tracking (`NegadoctorModes`) |
-| **Darktable XMP Export** | ✅ Yes | ✅ Yes | N/A | ✅ Darktable 5.6 fixture | ⏳ Pending | Phase 7 uses `quick-xml` writer escaping & verifies/provisions `NKLS4000LS40_N.icc` |
-| **TIFF Master / Working Output** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 7 distinguishes uncropped ICC-tagged `frame-<N>-master.tif` vs cropped `frame-<N>.tif` |
-| **GUI Review Studio** | ✅ Yes | ✅ Yes | ⚠️ Live worker wired | N/A | ⏳ Pending | Disconnected mode on missing HW; travel offset slider enabled & validated |
-| **GitHub Actions CI** | ✅ Yes | N/A | N/A | N/A | ✅ Active | Ubuntu & Windows workflows active on pinned Rust 1.98.1 toolchain |
+| **Discovery & Framing** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | 6-frame strip perforation discovery @ 2900 DPI verified on physical LS-40 |
+| **Exposure & Transport Retry** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | Scoped per attempt via `AttemptExposureState`; resets cleanly across retries |
+| **Real Hardware Cancellation** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | Mid-pass abort & immediate follow-up scan recovery verified on physical LS-40 |
+| **Stop After Current Frame** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | Multi-frame `[1, 2]` stop-after-current verified on physical LS-40 |
+| **Per-Frame Streaming Delivery** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | Streamed `1082x717 @ 725 DPI` frame artifact + bundle export verified on LS-40 |
+| **Sparse Frame Numbering** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | Preserves `p.source.frame_number` end-to-end; covered by regression tests |
+| **Multi-Sampling Limits (1–16)** | ✅ Yes | ✅ Yes | ✅ Aligned 1–16 | N/A | ✅ Ready | Core, CLI, and GUI aligned to 1–16 |
+| **Frame Selection & Failure Handling** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | Empty manual selection triggers validation; zero frames yields `AllFramesFailed` |
+| **Roll vs Stock Calibration** | ✅ Yes | ✅ Yes | ✅ Measured ProImage | ✅ Guarded uncalibrated | ✅ Ready | Phase 2 separates `FilmStock` from `RollCalibration` (Schema v2); unverified D-min defaults removed |
+| **Negadoctor Math & Inversion** | ✅ Yes | ✅ Yes | N/A | ✅ Darktable 5.6 fixture | ✅ Ready | Phase 6 verifies Stages A–D against real LS-40 Kodak Pro Image 100 + Darktable 5.6.0 |
+| **Processing Dependency Graph** | ✅ Yes | ✅ Yes | N/A | N/A | ✅ Ready | Phase 3 enforces deterministic Auto/Manual tracking (`NegadoctorModes`) |
+| **Darktable XMP Export** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | ✅ Darktable 5.6 fixture | ✅ Ready | Phase 7 uses `quick-xml` writer escaping & verifies/provisions `NKLS4000LS40_N.icc` |
+| **TIFF Master / Working Output** | ✅ Yes | ✅ Yes | ✅ Verified (`6d2dfe7`) | N/A | ✅ Ready | Phase 7 distinguishes uncropped ICC-tagged `frame-<N>-master.tif` vs cropped `frame-<N>.tif` |
+| **GUI Review Studio** | ✅ Yes | ✅ Yes | ✅ Live worker wired | N/A | ✅ Ready | Disconnected mode on missing HW; travel offset slider enabled & validated |
+| **GitHub Actions CI** | ✅ Yes | N/A | N/A | N/A | ✅ Active | Ubuntu & Windows workflows + Darktable Parity + Release CI active on Rust 1.98.1 |
 
 ### Baseline Context (at Commit `72514ea`)
 At the freeze baseline `72514ea`, sparse frame numbering was broken in review/export, retry exposure leaked across attempts, empty manual selection defaulted to All, zero-frame discoveries completed silently, sample limits conflicted (1–64 vs 1–16), missing hardware auto-launched mock frames, and GitHub Actions CI was absent.
@@ -86,10 +86,10 @@ At the freeze baseline `72514ea`, sparse frame numbering was broken in review/ex
   - [x] 8.3 Cross-platform Darktable 5.6.0 parity CI workflow (`.github/workflows/darktable-parity.yml` on `ubuntu-latest` and `windows-latest`)
   - [x] 8.4 Dependabot configuration (`.github/dependabot.yml` for `cargo` and `github-actions`)
   - [x] 8.5 Hardware-ignored test seam (`tests/hardware_acceptance.rs` with `#[ignore = "requires Nikon LS-40 hardware"]`)
-- [ ] **Phase 9: Hardware Acceptance Gate (`docs/HARDWARE_ACCEPTANCE.md` & `tests/hardware_acceptance.rs`)**
+- [x] **Phase 9: Hardware Acceptance Gate (`docs/HARDWARE_ACCEPTANCE.md` & `tests/hardware_acceptance.rs`)**
   - [x] 9.1 Create `docs/HARDWARE_ACCEPTANCE.md` runbook, checklist, and release-candidate hardware record template
   - [x] 9.2 Implement `#[ignore = "requires Nikon LS-40 hardware"]` acceptance suite (`ls40_device_discovery_and_status`, `ls40_single_frame_725_dpi_streaming_and_export`, `ls40_cancel_current_frame_and_recover`, `ls40_stop_after_current_frame_multi_frame`)
-  - [ ] 9.3 Execute physical Nikon LS-40 hardware acceptance run and record tested commit SHA
+  - [x] 9.3 Execute physical Nikon LS-40 hardware acceptance run and record tested commit SHA (`6d2dfe7`)
 - [x] **Phase 10: Release CI & Packaging Preparation**
   - [x] 10.1 Add reproducible Windows release workflow (`.github/workflows/release.yml`: stages binary, `README.md`, `NOTICES.md`, `profiles/`, `docs/`, creates `.zip` + `.sha256`)
   - [x] 10.2 Reconcile `Cargo.toml` repository metadata (`https://github.com/ajehg96/coolscan_studio`) and create `README.md`
