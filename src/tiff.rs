@@ -17,6 +17,18 @@ pub fn write_tiff(
     pass: &nkscan::scan::pass::Pass,
     dpi: u16,
 ) -> std::io::Result<()> {
+    write_tiff_with_icc(path, samples, pass, dpi, None)
+}
+
+/// Writes planar 16-bit `samples` to an uncompressed 16-bit RGB TIFF file,
+/// optionally embedding an ICC profile in Tag 34675 (`InterColorProfile`).
+pub fn write_tiff_with_icc(
+    path: &str,
+    samples: &Samples,
+    pass: &nkscan::scan::pass::Pass,
+    dpi: u16,
+    icc_profile: Option<&[u8]>,
+) -> std::io::Result<()> {
     if samples.colors.len() != 3 && samples.colors.len() != 1 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -66,6 +78,17 @@ pub fn write_tiff(
             )
         })?;
 
+    let icc_bytes = icc_profile.filter(|b| !b.is_empty());
+    let icc_len = match icc_bytes {
+        Some(b) => u32::try_from(b.len()).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ICC profile is too large for TIFF",
+            )
+        })?,
+        None => 0,
+    };
+
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
@@ -78,9 +101,8 @@ pub fn write_tiff(
     writer.write_all(&42u16.to_le_bytes())?;
     writer.write_all(&ifd_offset.to_le_bytes())?;
 
-    // IFD Directory entries
-    // Total entries: 13
-    let num_entries: u16 = 13;
+    // IFD Directory entries: 13 standard + 1 optional InterColorProfile (Tag 34675)
+    let num_entries: u16 = if icc_bytes.is_some() { 14 } else { 13 };
     let ifd_size = 2 + (num_entries as u32 * 12) + 4; // count + entries + next_ifd
     let mut extra_data_offset = ifd_offset + ifd_size;
 
@@ -97,13 +119,17 @@ pub fn write_tiff(
     let y_res_offset = extra_data_offset;
     extra_data_offset += 8;
 
+    // Optional ICC profile (Tag 34675, UNDEFINED = 7)
+    let icc_offset = extra_data_offset;
+    extra_data_offset += icc_len;
+
     // Align image data to 4-byte boundary
     let pixel_data_offset = (extra_data_offset + 3) & !3;
 
     writer.write_all(&num_entries.to_le_bytes())?;
 
     // Helper to write a 12-byte IFD entry (Tag, Type, Count, Value/Offset)
-    // Types: 1=BYTE, 2=ASCII, 3=SHORT, 4=LONG, 5=RATIONAL
+    // Types: 1=BYTE, 2=ASCII, 3=SHORT, 4=LONG, 5=RATIONAL, 7=UNDEFINED
     let mut write_entry =
         |tag: u16, tag_type: u16, count: u32, val_or_off: u32| -> std::io::Result<()> {
             writer.write_all(&tag.to_le_bytes())?;
@@ -144,6 +170,10 @@ pub fn write_tiff(
     write_entry(283, 5, 1, y_res_offset)?;
     // Tag 296 (0x0128) ResolutionUnit: 2 = Inches
     write_entry(296, 3, 1, 2)?;
+    // Tag 34675 (0x8773) InterColorProfile (UNDEFINED = 7)
+    if icc_bytes.is_some() {
+        write_entry(34675, 7, icc_len, icc_offset)?;
+    }
 
     // Next IFD offset: 0 (no more IFDs)
     writer.write_all(&0u32.to_le_bytes())?;
@@ -162,6 +192,11 @@ pub fn write_tiff(
     // YResolution: [dpi as u32, 1u32]
     writer.write_all(&(dpi as u32).to_le_bytes())?;
     writer.write_all(&1u32.to_le_bytes())?;
+
+    // Optional ICC profile data
+    if let Some(icc) = icc_bytes {
+        writer.write_all(icc)?;
+    }
 
     // Padding to pixel_data_offset
     let current_pos = extra_data_offset;
@@ -197,6 +232,174 @@ pub fn write_tiff(
 
     writer.flush()?;
     Ok(())
+}
+
+/// Parsed representation of a 16-bit uncompressed Baseline TIFF 6.0 file.
+#[derive(Debug, Clone)]
+pub struct ParsedTiff {
+    pub samples: Samples,
+    pub pass: nkscan::scan::pass::Pass,
+    pub dpi: u16,
+    pub icc_profile: Option<Vec<u8>>,
+}
+
+/// Reads an uncompressed 16-bit RGB or grayscale Baseline TIFF 6.0 file into planar `Samples`.
+pub fn read_tiff(path: &std::path::Path) -> std::io::Result<ParsedTiff> {
+    let bytes = std::fs::read(path)?;
+    if bytes.len() < 16 || &bytes[0..2] != b"II" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Invalid or unsupported TIFF header (expected little-endian II)",
+        ));
+    }
+    let magic = u16::from_le_bytes([bytes[2], bytes[3]]);
+    if magic != 42 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Invalid TIFF magic number: {magic}"),
+        ));
+    }
+    let ifd_offset = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    if ifd_offset + 2 > bytes.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "IFD offset out of bounds",
+        ));
+    }
+    let num_entries = u16::from_le_bytes([bytes[ifd_offset], bytes[ifd_offset + 1]]) as usize;
+    if ifd_offset + 2 + num_entries * 12 > bytes.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "IFD directory entries truncated",
+        ));
+    }
+
+    let mut width: Option<usize> = None;
+    let mut height: Option<usize> = None;
+    let mut strip_offset: Option<usize> = None;
+    let mut samples_per_pixel: usize = 3;
+    let mut dpi: u16 = 725;
+    let mut icc_profile: Option<Vec<u8>> = None;
+
+    for i in 0..num_entries {
+        let off = ifd_offset + 2 + i * 12;
+        let tag = u16::from_le_bytes([bytes[off], bytes[off + 1]]);
+        let tag_type = u16::from_le_bytes([bytes[off + 2], bytes[off + 3]]);
+        let count = u32::from_le_bytes([
+            bytes[off + 4],
+            bytes[off + 5],
+            bytes[off + 6],
+            bytes[off + 7],
+        ]) as usize;
+        let val_or_off = u32::from_le_bytes([
+            bytes[off + 8],
+            bytes[off + 9],
+            bytes[off + 10],
+            bytes[off + 11],
+        ]) as usize;
+
+        let scalar_val = if tag_type == 3 {
+            u16::from_le_bytes([bytes[off + 8], bytes[off + 9]]) as usize
+        } else {
+            val_or_off
+        };
+
+        match tag {
+            256 => width = Some(scalar_val),
+            257 => height = Some(scalar_val),
+            273 => strip_offset = Some(scalar_val),
+            277 => samples_per_pixel = scalar_val,
+            282 => {
+                if val_or_off + 8 <= bytes.len() {
+                    let num = u32::from_le_bytes([
+                        bytes[val_or_off],
+                        bytes[val_or_off + 1],
+                        bytes[val_or_off + 2],
+                        bytes[val_or_off + 3],
+                    ]);
+                    let den = u32::from_le_bytes([
+                        bytes[val_or_off + 4],
+                        bytes[val_or_off + 5],
+                        bytes[val_or_off + 6],
+                        bytes[val_or_off + 7],
+                    ]);
+                    if let Some(q) = num.checked_div(den) {
+                        dpi = q as u16;
+                    }
+                }
+            }
+            34675 if val_or_off + count <= bytes.len() => {
+                icc_profile = Some(bytes[val_or_off..val_or_off + count].to_vec());
+            }
+            _ => {}
+        }
+    }
+
+    let w = width.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing TIFF ImageWidth")
+    })?;
+    let h = height.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing TIFF ImageLength")
+    })?;
+    let data_off = strip_offset.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing TIFF StripOffsets")
+    })?;
+
+    if samples_per_pixel != 1 && samples_per_pixel != 3 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Unsupported SamplesPerPixel: {samples_per_pixel}"),
+        ));
+    }
+
+    let total_pixels = w * h;
+    let data_bytes = total_pixels * samples_per_pixel * 2;
+    if data_off + data_bytes > bytes.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "TIFF pixel data truncated",
+        ));
+    }
+
+    let raw_data = &bytes[data_off..data_off + data_bytes];
+    let colors = if samples_per_pixel == 3 {
+        let mut r = Vec::with_capacity(total_pixels);
+        let mut g = Vec::with_capacity(total_pixels);
+        let mut b = Vec::with_capacity(total_pixels);
+        for px in raw_data.as_chunks::<6>().0 {
+            r.push(u16::from_le_bytes([px[0], px[1]]));
+            g.push(u16::from_le_bytes([px[2], px[3]]));
+            b.push(u16::from_le_bytes([px[4], px[5]]));
+        }
+        vec![r, g, b]
+    } else {
+        let mut gray = Vec::with_capacity(total_pixels);
+        for px in raw_data.as_chunks::<2>().0 {
+            gray.push(u16::from_le_bytes([px[0], px[1]]));
+        }
+        vec![gray]
+    };
+
+    let channels = if samples_per_pixel == 3 {
+        vec![1, 2, 3]
+    } else {
+        vec![1]
+    };
+    let pass = nkscan::scan::pass::Pass {
+        layout: nkscan::protocol::image::Layout::single_line(h as u32, w as u32, channels),
+        cooperation: Vec::new(),
+        complete: true,
+        blocks: 1,
+        rows: h,
+        cols: w,
+    };
+
+    Ok(ParsedTiff {
+        samples: Samples { colors, ir: None },
+        pass,
+        dpi,
+        icc_profile,
+    })
 }
 
 #[cfg(test)]

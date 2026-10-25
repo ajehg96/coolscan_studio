@@ -9,6 +9,53 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::processing::color::DEFAULT_LS40_ICC_BYTES;
+
+/// Canonical filename for the Nikon LS-4000 / LS-40 Negative ICC profile expected by Darktable `colorin`.
+pub const DEFAULT_LS40_ICC_FILENAME: &str = "NKLS4000LS40_N.icc";
+
+/// Computes a deterministic 64-bit FNV-1a digest for ICC profile integrity verification.
+pub const fn compute_icc_fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+        i += 1;
+    }
+    hash
+}
+
+/// Expected 64-bit FNV-1a hash of the bundled `NKLS4000LS40_N.icc` profile.
+pub const DEFAULT_LS40_ICC_FNV1A64: u64 = compute_icc_fnv1a64(DEFAULT_LS40_ICC_BYTES);
+
+/// Verification state of the `NKLS4000LS40_N.icc` profile in Darktable's input profile directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DarktableIccStatus {
+    /// Profile is present in Darktable's `color/in` directory and matches the expected size and hash.
+    Verified {
+        path: PathBuf,
+        size_bytes: usize,
+        fnv1a64: u64,
+    },
+    /// A file with the profile name exists, but its byte content does not match the expected profile.
+    HashMismatch {
+        path: PathBuf,
+        expected_fnv1a64: u64,
+        actual_fnv1a64: u64,
+        actual_size: usize,
+    },
+    /// Profile is not yet installed in Darktable's `color/in` directory.
+    Missing { expected_path: PathBuf },
+}
+
+impl DarktableIccStatus {
+    /// Returns true if the ICC profile is installed and verified.
+    pub fn is_verified(&self) -> bool {
+        matches!(self, DarktableIccStatus::Verified { .. })
+    }
+}
+
 /// System diagnostic report on hardware, drivers, Darktable, and color management.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemDiagnostics {
@@ -22,6 +69,8 @@ pub struct SystemDiagnostics {
     pub darktable_path: Option<PathBuf>,
     /// Version string of the detected Darktable CLI executable, if available.
     pub darktable_version: Option<String>,
+    /// Verification status of `NKLS4000LS40_N.icc` in Darktable's input profile directory.
+    pub icc_profile_status: DarktableIccStatus,
     /// Status description of the LittleCMS 2 color engine.
     pub color_engine_info: String,
     /// Application configuration and preferences directory.
@@ -52,11 +101,12 @@ impl SystemDiagnostics {
                 )
             };
 
-        // 2. Probe Darktable CLI installation
+        // 2. Probe Darktable CLI installation and ICC profile status
         let darktable_path = detect_darktable_cli();
         let darktable_version = darktable_path
             .as_ref()
             .and_then(|p| query_darktable_version(p));
+        let icc_profile_status = probe_darktable_icc_status();
 
         // 3. Probe LittleCMS 2 color management
         let color_engine_info =
@@ -76,6 +126,7 @@ impl SystemDiagnostics {
             driver_status,
             darktable_path,
             darktable_version,
+            icc_profile_status,
             color_engine_info,
             config_directory,
             default_output_directory,
@@ -103,7 +154,7 @@ impl SystemDiagnostics {
         }
         out.push('\n');
 
-        out.push_str("2. Darktable Integration:\n");
+        out.push_str("2. Darktable Integration & Input ICC Profile:\n");
         if let Some(path) = &self.darktable_path {
             out.push_str(&format!(
                 "   [✓] darktable-cli detected: {}\n",
@@ -119,6 +170,42 @@ impl SystemDiagnostics {
             out.push_str(
                 "           enable automatic render testing and direct raw development.\n",
             );
+        }
+        match &self.icc_profile_status {
+            DarktableIccStatus::Verified {
+                path,
+                size_bytes,
+                fnv1a64,
+            } => {
+                out.push_str(&format!(
+                    "   [✓] Darktable input ICC verified: {} ({} bytes, FNV-1a {:016x})\n",
+                    path.display(),
+                    size_bytes,
+                    fnv1a64
+                ));
+            }
+            DarktableIccStatus::HashMismatch {
+                path,
+                expected_fnv1a64,
+                actual_fnv1a64,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "   [!] Darktable input ICC checksum mismatch at {}: expected {:016x}, found {:016x}\n",
+                    path.display(),
+                    expected_fnv1a64,
+                    actual_fnv1a64
+                ));
+            }
+            DarktableIccStatus::Missing { expected_path } => {
+                out.push_str(&format!(
+                    "   [!] Darktable input ICC not yet installed at: {}\n",
+                    expected_path.display()
+                ));
+                out.push_str(
+                    "   Action: Coolscan Studio will automatically provision NKLS4000LS40_N.icc on XMP export.\n",
+                );
+            }
         }
         out.push('\n');
 
@@ -145,6 +232,153 @@ impl SystemDiagnostics {
     }
 }
 
+/// Resolves Darktable's `color/in` directory where custom input ICC profiles must reside.
+pub fn resolve_darktable_color_in_dir() -> PathBuf {
+    if let Ok(custom_dir) = std::env::var("DARKTABLE_COLOR_IN_DIR")
+        && !custom_dir.trim().is_empty()
+    {
+        return PathBuf::from(custom_dir);
+    }
+    if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+        return PathBuf::from(local_appdata)
+            .join("darktable")
+            .join("color")
+            .join("in");
+    }
+    if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg_config.trim().is_empty()
+    {
+        return PathBuf::from(xdg_config)
+            .join("darktable")
+            .join("color")
+            .join("in");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".config")
+            .join("darktable")
+            .join("color")
+            .join("in");
+    }
+    PathBuf::from("./darktable/color/in")
+}
+
+/// Probes the status of `NKLS4000LS40_N.icc` inside a specific Darktable `color/in` directory.
+pub fn probe_darktable_icc_status_in_dir(color_in_dir: &Path) -> DarktableIccStatus {
+    let expected_path = color_in_dir.join(DEFAULT_LS40_ICC_FILENAME);
+    let Ok(bytes) = std::fs::read(&expected_path) else {
+        return DarktableIccStatus::Missing { expected_path };
+    };
+    let actual_fnv1a64 = compute_icc_fnv1a64(&bytes);
+    if bytes.len() == DEFAULT_LS40_ICC_BYTES.len() && actual_fnv1a64 == DEFAULT_LS40_ICC_FNV1A64 {
+        DarktableIccStatus::Verified {
+            path: expected_path,
+            size_bytes: bytes.len(),
+            fnv1a64: actual_fnv1a64,
+        }
+    } else {
+        DarktableIccStatus::HashMismatch {
+            path: expected_path,
+            expected_fnv1a64: DEFAULT_LS40_ICC_FNV1A64,
+            actual_fnv1a64,
+            actual_size: bytes.len(),
+        }
+    }
+}
+
+/// Probes the status of `NKLS4000LS40_N.icc` in the system's Darktable `color/in` directory.
+pub fn probe_darktable_icc_status() -> DarktableIccStatus {
+    let dir = resolve_darktable_color_in_dir();
+    probe_darktable_icc_status_in_dir(&dir)
+}
+
+/// Installs the bundled `NKLS4000LS40_N.icc` into the specified Darktable `color/in` directory
+/// atomically (via a temporary file and rename) and verifies its integrity.
+pub fn install_darktable_icc_profile_to_dir(color_in_dir: &Path) -> std::io::Result<PathBuf> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let _guard = icc_install_lock().lock().unwrap_or_else(|e| e.into_inner());
+    std::fs::create_dir_all(color_in_dir)?;
+    let target = color_in_dir.join(DEFAULT_LS40_ICC_FILENAME);
+    let tmp_name = format!(
+        ".{}.tmp.{}.{}",
+        DEFAULT_LS40_ICC_FILENAME,
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let tmp_path = color_in_dir.join(tmp_name);
+    std::fs::write(&tmp_path, DEFAULT_LS40_ICC_BYTES)?;
+    if let Err(e) = std::fs::rename(&tmp_path, &target) {
+        let _ = std::fs::remove_file(&tmp_path);
+        std::fs::write(&target, DEFAULT_LS40_ICC_BYTES).map_err(|_| e)?;
+    }
+    match probe_darktable_icc_status_in_dir(color_in_dir) {
+        DarktableIccStatus::Verified { path, .. } => Ok(path),
+        other => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("ICC verification failed after write: {other:?}"),
+        )),
+    }
+}
+
+fn icc_install_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Ensures `NKLS4000LS40_N.icc` is available and verified before writing a Darktable XMP sidecar.
+///
+/// - If already verified in `color_in_dir`, returns `Ok("NKLS4000LS40_N.icc")`.
+/// - If missing in `color_in_dir`, installs and verifies it in `color_in_dir` (or falls back to
+///   provisioning a verified copy in `export_dir`).
+/// - If a corrupted / mismatched file exists in `color_in_dir`, returns an actionable `Err`
+///   rather than silently generating a broken sidecar.
+pub fn ensure_darktable_icc_for_export(
+    export_dir: &Path,
+    color_in_dir_override: Option<&Path>,
+) -> Result<String, String> {
+    let default_dir;
+    let color_in_dir = match color_in_dir_override {
+        Some(d) => d,
+        None => {
+            default_dir = resolve_darktable_color_in_dir();
+            &default_dir
+        }
+    };
+
+    match probe_darktable_icc_status_in_dir(color_in_dir) {
+        DarktableIccStatus::Verified { .. } => Ok(DEFAULT_LS40_ICC_FILENAME.to_string()),
+        DarktableIccStatus::HashMismatch {
+            path,
+            expected_fnv1a64,
+            actual_fnv1a64,
+            actual_size,
+        } => Err(format!(
+            "Darktable input ICC profile at '{}' failed integrity check (size {} bytes, FNV-1a {:016x}, expected {:016x}). Remove or replace the corrupted file before exporting.",
+            path.display(),
+            actual_size,
+            actual_fnv1a64,
+            expected_fnv1a64
+        )),
+        DarktableIccStatus::Missing { .. } => {
+            if install_darktable_icc_profile_to_dir(color_in_dir).is_ok() {
+                return Ok(DEFAULT_LS40_ICC_FILENAME.to_string());
+            }
+            // Fallback: provision verified ICC side-by-side in export_dir
+            install_darktable_icc_profile_to_dir(export_dir).map_err(|e| {
+                format!(
+                    "Unable to install '{}' into Darktable profile directory '{}' or export directory '{}': {e}",
+                    DEFAULT_LS40_ICC_FILENAME,
+                    color_in_dir.display(),
+                    export_dir.display()
+                )
+            })?;
+            Ok(DEFAULT_LS40_ICC_FILENAME.to_string())
+        }
+    }
+}
+
 /// Detects the Darktable CLI executable location across environment variables, standard paths, and PATH.
 pub fn detect_darktable_cli() -> Option<PathBuf> {
     // 1. Check DARKTABLE_PATH or DARKTABLE_CLI environment variable
@@ -157,16 +391,19 @@ pub fn detect_darktable_cli() -> Option<PathBuf> {
         }
     }
 
-    // 2. Check standard Windows installation paths
-    let windows_candidates = [
-        "C:\\Program Files\\darktable\\bin\\darktable-cli.exe",
-        "C:\\Program Files (x86)\\darktable\\bin\\darktable-cli.exe",
-        "D:\\Program Files\\darktable\\bin\\darktable-cli.exe",
-    ];
-    for candidate in &windows_candidates {
-        let p = Path::new(candidate);
-        if p.is_file() {
-            return Some(p.to_path_buf());
+    // 2. Check standard Windows installation paths (only on Windows)
+    #[cfg(windows)]
+    {
+        let windows_candidates = [
+            "C:\\Program Files\\darktable\\bin\\darktable-cli.exe",
+            "C:\\Program Files (x86)\\darktable\\bin\\darktable-cli.exe",
+            "D:\\Program Files\\darktable\\bin\\darktable-cli.exe",
+        ];
+        for candidate in &windows_candidates {
+            let p = Path::new(candidate);
+            if p.is_file() {
+                return Some(p.to_path_buf());
+            }
         }
     }
 
@@ -256,5 +493,48 @@ mod tests {
 
         let out = resolve_default_output_dir();
         assert!(!out.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn darktable_icc_verification_provisioning_and_corruption_detection() {
+        let temp_root =
+            std::env::temp_dir().join(format!("coolscan_icc_test_{}", std::process::id()));
+        let color_in = temp_root.join("color_in");
+        let export_dir = temp_root.join("export");
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        // 1. Initially missing
+        let status = probe_darktable_icc_status_in_dir(&color_in);
+        assert!(matches!(status, DarktableIccStatus::Missing { .. }));
+
+        // 2. Export provisioning automatically installs and verifies NKLS4000LS40_N.icc
+        let name = ensure_darktable_icc_for_export(&export_dir, Some(&color_in)).unwrap();
+        assert_eq!(name, DEFAULT_LS40_ICC_FILENAME);
+
+        let verified = probe_darktable_icc_status_in_dir(&color_in);
+        assert!(verified.is_verified());
+        if let DarktableIccStatus::Verified {
+            size_bytes,
+            fnv1a64,
+            ..
+        } = verified
+        {
+            assert_eq!(size_bytes, DEFAULT_LS40_ICC_BYTES.len());
+            assert_eq!(fnv1a64, DEFAULT_LS40_ICC_FNV1A64);
+        }
+
+        // 3. Corrupted ICC file in color/in is detected and refused (no silent broken XMP)
+        std::fs::write(
+            color_in.join(DEFAULT_LS40_ICC_FILENAME),
+            b"corrupted-icc-bytes",
+        )
+        .unwrap();
+        let mismatch = probe_darktable_icc_status_in_dir(&color_in);
+        assert!(matches!(mismatch, DarktableIccStatus::HashMismatch { .. }));
+
+        let err = ensure_darktable_icc_for_export(&export_dir, Some(&color_in)).unwrap_err();
+        assert!(err.contains("failed integrity check"));
+
+        let _ = std::fs::remove_dir_all(&temp_root);
     }
 }

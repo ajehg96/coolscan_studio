@@ -5,7 +5,7 @@
 - **Name:** Coolscan Studio
 - **Version:** 0.1.0
 - **License:** MIT OR Apache-2.0
-- **Repository:** https://github.com/activexray/coolscan-studio
+- **Repository:** https://github.com/ajehg96/coolscan_studio
 
 Coolscan Studio is a post-scan review studio and scanner controller designed specifically for Nikon Coolscan film scanners (LS-40 ED / IV ED, LS-50 ED / V ED, LS-4000 ED, LS-5000 ED), featuring direct Darktable Negadoctor mathematical compatibility.
 
@@ -40,17 +40,21 @@ Coolscan Studio utilizes LittleCMS 2 for ICC color management, including convert
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the standard MIT conditions.
 
-### 2. Darktable Compatibility Notice
+### 2. Darktable Compatibility Notice (Mathematical Specification)
 
-Coolscan Studio implements the exact mathematical equations used in Darktable's **Negadoctor** color film negative inversion module and **Colorin** input profile modules.
+Coolscan Studio implements the mathematical equations and binary parameter structures specified by Darktable's **Negadoctor** (`negadoctor` modversion 2) color film negative inversion module and **Colorin** (`colorin` modversion 7) input profile module for interoperability with Darktable 5.x.
 
-- Coolscan Studio writes standard XML sidecars (`.tif.xmp`) conforming to Darktable's open specification.
-- Coolscan Studio is an independent clean-room implementation and does not link Darktable code or libraries.
+- Coolscan Studio writes standard XML sidecars (`.tif.xmp`) conforming to Darktable's open sidecar format.
+- The Rust implementation in `src/processing/negadoctor.rs` and `src/darktable/xmp.rs` is written in Rust against Darktable's documented mathematical formulas and C struct layouts (`dt_iop_negadoctor_params_t`, `dt_iop_colorin_params_t`, `dt_iop_flip_params_t`) without linking Darktable C/C++ libraries.
 - Darktable is developed by the Darktable Team (https://www.darktable.org) and licensed under the GNU General Public License v3.0 or later.
 
-### 3. Nikon Coolscan Calibration Profiles
+### 3. Nikon Coolscan ICC Profiles (`profiles/NKLS4000LS40_N.icc`)
 
-The default color pipeline profile for the Nikon Super Coolscan LS-40 ED is derived from standardized scanner characterization data targeting CIE standard illuminant D50 and standard 35mm color film substrate. Users can supply custom ICC scanner profiles or film calibration profiles in standard JSON format.
+The scanner input profile `profiles/NKLS4000LS40_N.icc` (sourced via `nkscan`) is derived from the ICM profiles in the Nikon Scan 4 installer, which carry the notice `"Nikon Inc. & Nikon Corporation 2003"` (retained inside the profile header).
+
+- **License Carve-Out:** As documented by `nkscan`, these Nikon-derived ICC profile files are **not** covered by Coolscan Studio's or `nkscan`'s MIT/Apache-2.0 license, and no license to those profile tables is granted here.
+- Two structural adjustments were made by `nkscan/scripts/profiles.py` for LittleCMS / Darktable compatibility: the profile class header was changed from Nikon's private `nkpf` tag to standard `scnr`, and the gamma 2.2 encoding expected by Nikon Scan's CMS was composed into the profile's curves so that the profile accepts linear 16-bit scanner samples directly.
+- Users may also supply their own custom scanner ICC profiles or rebuild the profile from their own Nikon Scan 4 installer copy.
 
 ---
 

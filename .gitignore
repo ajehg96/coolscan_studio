@@ -29,3 +29,7 @@ __pycache__/
 # Scan capture output folders
 scans-*/
 quick-pass/
+
+# Allow committed test fixtures (including reference TIFF and Darktable XMP sidecars)
+!tests/fixtures/
+!tests/fixtures/**

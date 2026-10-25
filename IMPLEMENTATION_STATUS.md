@@ -19,10 +19,10 @@
 | **Multi-Sampling Limits (1–16)** | ✅ Yes | ✅ Yes | ⚠️ Hardware unverified >16 | N/A | ⏳ Pending | Core, CLI, and GUI aligned to 1–16 |
 | **Frame Selection & Failure Handling** | ✅ Yes | ✅ Yes | ⚠️ Pending HW run | N/A | ⏳ Pending | Empty manual selection triggers validation; zero frames yields `AllFramesFailed` |
 | **Roll vs Stock Calibration** | ✅ Yes | ✅ Yes | ⚠️ Measured ProImage only | ✅ Guarded uncalibrated | ⏳ Pending | Phase 2 separates `FilmStock` from `RollCalibration` (Schema v2); unverified D-min defaults removed |
-| **Negadoctor Math & Inversion** | ✅ Yes | ✅ Yes | N/A | ⚠️ Synthetic golden | ⏳ Pending | Phase 6 adds real Darktable 5.6 reference fixtures |
+| **Negadoctor Math & Inversion** | ✅ Yes | ✅ Yes | N/A | ✅ Darktable 5.6 fixture | ⏳ Pending | Phase 6 verifies Stages A–D against real LS-40 Kodak Pro Image 100 + Darktable 5.6.0 |
 | **Processing Dependency Graph** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 3 enforces deterministic Auto/Manual tracking (`NegadoctorModes`) |
-| **Darktable XMP Export** | ✅ Yes | ✅ Yes | N/A | ⚠️ Partial | ⏳ Pending | Phase 7 adds XML writer & ICC validation |
-| **TIFF Master / Working Output** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 7 formalizes master vs working TIFF policy |
+| **Darktable XMP Export** | ✅ Yes | ✅ Yes | N/A | ✅ Darktable 5.6 fixture | ⏳ Pending | Phase 7 uses `quick-xml` writer escaping & verifies/provisions `NKLS4000LS40_N.icc` |
+| **TIFF Master / Working Output** | ✅ Yes | ✅ Yes | N/A | N/A | ⏳ Pending | Phase 7 distinguishes uncropped ICC-tagged `frame-<N>-master.tif` vs cropped `frame-<N>.tif` |
 | **GUI Review Studio** | ✅ Yes | ✅ Yes | ⚠️ Live worker wired | N/A | ⏳ Pending | Disconnected mode on missing HW; travel offset slider enabled & validated |
 | **GitHub Actions CI** | ✅ Yes | N/A | N/A | N/A | ✅ Active | Ubuntu & Windows workflows active on pinned Rust 1.98.1 toolchain |
 
@@ -68,8 +68,18 @@ At the freeze baseline `72514ea`, sparse frame numbering was broken in review/ex
   - [x] 5.3 Retain `WorkingImage` in `PreparedFrame::from_artifact` and reuse in `ReviewSession` to eliminate duplicate color conversion
   - [x] 5.4 Stream `WorkerMessage::FrameReady` per frame from `HardwareScannerBackend::scan_strip`
   - [x] 5.5 Add regression tests for streaming delivery order, cancellation preservation, and single-conversion color pipeline
-- [ ] **Phase 6: Darktable Parity Fixtures (PR 6)**
-- [ ] **Phase 7: Export Hardening (PR 7)**
+- [x] **Phase 6: Darktable Parity Fixtures (PR 6)**
+  - [x] 6.1 Commit real Nikon LS-40 Kodak Pro Image 100 16-bit scanner sample fixture (`pro_image_100_frame4_crop.tif`), Darktable 5.6.0 XMP sidecars, and parity manifest (`pro_image_100_parity_fixture.json`)
+  - [x] 6.2 Stage A: Verify ICC input transform parity (`NKLS4000LS40_N.icc` → Linear Rec.2020)
+  - [x] 6.3 Stage B: Verify regional & full-frame picker statistics parity (`min`, `max`, `mean`, `count`)
+  - [x] 6.4 Stage C: Verify Negadoctor auto parameter parity (`D-max`, `scan_bias`, `wb_high`, `paper_black`, `print_exposure`) and XMP binary struct/history layout
+  - [x] 6.5 Stage D: Verify rendered pixel parity in linear print space and 8-bit display sRGB
+- [x] **Phase 7: Export Hardening (PR 7)**
+  - [x] 7.1 Replace manual XMP string interpolation with `quick-xml` writer (`BytesStart` / `BytesDecl`) and attribute unescaping, with tests for `&`, `"`, `<`, `>`, and Unicode filenames
+  - [x] 7.2 Implement Darktable `color/in` ICC profile verification (size + 64-bit FNV-1a digest), automatic provisioning on clean machines, and corruption rejection
+  - [x] 7.3 Formalize Scanner Master TIFF (`frame-<N>-master.tif`, uncropped 16-bit with embedded ICC Tag 34675) vs Working TIFF (`frame-<N>.tif`, cropped 16-bit paired with `.tif.xmp`) and `read_tiff` parser
+  - [x] 7.4 Reconcile Nikon ICC profile license carve-out and Darktable mathematical specification provenance in `NOTICES.md` and `profiles/README.md`
+  - [x] 7.5 Add `.github/workflows/darktable-parity.yml` CI workflow
 - [x] **Phase 8: GitHub CI Foundation (Workflows created: `ci.yml`, `windows-build.yml`, pinned Rust 1.98.1 toolchain)**
 - [ ] **Phase 9: Hardware Acceptance Gate (PR 9)**
 - [ ] **Phase 10: Release CI & Packaging (PR 10)**
