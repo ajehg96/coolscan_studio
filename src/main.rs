@@ -85,7 +85,9 @@ fn main() {
 
         let session = ReviewSession::empty(roll, pipeline);
         let out_dir = options.output.as_deref().unwrap_or("./scans");
-        let mut app = ReviewApp::new(session).with_output_dir(out_dir);
+        let mut app = ReviewApp::new(session)
+            .with_output_dir(out_dir)
+            .load_saved_calibrations();
         app.status_message = initial_status.into();
         if let Some(w) = worker {
             app = app.with_worker(w);

@@ -285,16 +285,17 @@ impl CropDecision {
         };
 
         let frame_cols = right.saturating_sub(left);
-        let accepted = leading_confident && trailing_confident && frame_cols >= cols / 2;
+        let both_confident = leading_confident && trailing_confident && frame_cols >= cols / 2;
+        let is_real_scan_geometry = rows >= 400 && cols >= 600;
 
-        let (rows_range, columns) = if accepted {
+        let (accepted, rows_range, columns) = if both_confident {
             let inset = options.edge_inset_columns;
             let left_inset = (left + inset).min(right);
             let right_inset = right.saturating_sub(inset).max(left_inset);
 
             let (top_aperture, bottom_aperture) = detect_row_aperture(samples, rows, cols);
 
-            if let Some((h_ratio, w_ratio)) = options.aspect_ratio {
+            let fitted = if let Some((h_ratio, w_ratio)) = options.aspect_ratio {
                 fit_centered_aspect_ratio(
                     (top_aperture, bottom_aperture),
                     (left_inset, right_inset),
@@ -303,9 +304,54 @@ impl CropDecision {
                 )
             } else {
                 ((top_aperture, bottom_aperture), (left_inset, right_inset))
+            };
+            (true, fitted.0, fitted.1)
+        } else if is_real_scan_geometry
+            && let Some((h_ratio, w_ratio)) = options.aspect_ratio
+            && h_ratio > 0
+            && w_ratio > 0
+        {
+            let (top_aperture, bottom_aperture) = detect_row_aperture(samples, rows, cols);
+            let aperture_h = bottom_aperture.saturating_sub(top_aperture);
+            let target_w =
+                ((aperture_h as f64) * (w_ratio as f64) / (h_ratio as f64)).round() as usize;
+            let inset = options.edge_inset_columns;
+
+            if leading_confident && !trailing_confident && target_w >= cols / 2 {
+                let left_inset = (left + inset).min(cols);
+                let right_anchored = (left_inset + target_w).min(cols);
+                let fitted = fit_centered_aspect_ratio(
+                    (top_aperture, bottom_aperture),
+                    (left_inset, right_anchored),
+                    h_ratio,
+                    w_ratio,
+                );
+                (true, fitted.0, fitted.1)
+            } else if !leading_confident && trailing_confident && target_w >= cols / 2 {
+                let right_inset = right.saturating_sub(inset).min(cols);
+                let left_anchored = right_inset.saturating_sub(target_w);
+                let fitted = fit_centered_aspect_ratio(
+                    (top_aperture, bottom_aperture),
+                    (left_anchored, right_inset),
+                    h_ratio,
+                    w_ratio,
+                );
+                (true, fitted.0, fitted.1)
+            } else if top_aperture > 0 || bottom_aperture < rows {
+                let left_bound = inset.min(cols / 4);
+                let right_bound = cols.saturating_sub(left_bound);
+                let fitted = fit_centered_aspect_ratio(
+                    (top_aperture, bottom_aperture),
+                    (left_bound, right_bound),
+                    h_ratio,
+                    w_ratio,
+                );
+                (true, fitted.0, fitted.1)
+            } else {
+                (false, (0, rows), (0, cols))
             }
         } else {
-            ((0, rows), (0, cols))
+            (false, (0, rows), (0, cols))
         };
 
         let travel_dots = (
@@ -950,5 +996,58 @@ mod tests {
         assert_eq!(top, 25);
         // Bottom was bright, so it detected row 691 and inset by 2 -> 689.
         assert_eq!(bottom, 689);
+    }
+
+    #[test]
+    fn from_preview_samples_anchors_single_confident_edge_on_real_scan_geometry() {
+        // 717 rows, 1082 cols (typical 725 DPI overscan frame)
+        // SA-21 top/bottom black mask: rows 0..22 and 692..717
+        // Leading gap: cols 0..35 (55000), image: cols 35..1082 (no trailing gap at end of strip)
+        let rows = 717;
+        let cols = 1082;
+        let mut plane = Vec::with_capacity(rows * cols);
+        for row in 0..rows {
+            let is_mask = (0..22).contains(&row) || (692..717).contains(&row);
+            for col in 0..cols {
+                let val = if is_mask {
+                    50u16
+                } else if col < 35 {
+                    55000u16
+                } else {
+                    15000u16
+                };
+                plane.push(val);
+            }
+        }
+        let samples = nkscan::protocol::decode::Samples {
+            colors: vec![plane],
+            ir: None,
+        };
+        let pass = mock_pass(rows, cols);
+
+        let decision = CropDecision::from_preview_samples(
+            &samples,
+            &pass,
+            30000,
+            4.0,
+            &CropOptions::default(),
+        )
+        .unwrap();
+
+        assert!(decision.accepted);
+        assert!(decision.leading.is_confident());
+        assert!(!decision.trailing.is_confident());
+        // Vertical mask rails (0..22 and 692..717) are cropped away
+        assert!(decision.rows.0 >= 22);
+        assert!(decision.rows.1 <= 692);
+        // Anchored from leading edge (35 + 5 inset = 40) with ~3:2 aspect ratio
+        assert_eq!(decision.columns.0, 40);
+        let h = decision.rows.1 - decision.rows.0;
+        let w = decision.columns.1 - decision.columns.0;
+        let ratio = w as f64 / h as f64;
+        assert!(
+            (ratio - 1.5).abs() < 0.02,
+            "Expected ~1.5 aspect ratio, got {ratio}"
+        );
     }
 }

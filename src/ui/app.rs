@@ -16,7 +16,7 @@ use egui::{
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use super::review::{ReviewSession, SelectionStatus};
+use super::review::{PickerMode, ReviewSession, SelectionStatus};
 use crate::processing::RollProfile;
 use crate::processing::analysis::SampleRect;
 use crate::processing::orientation::OrientationScope;
@@ -42,6 +42,10 @@ pub struct ScanSetupState {
     pub output_dir_str: String,
     pub film_stock_index: usize,
     pub roll_profile: RollProfile,
+    /// When true, automatically estimates `D-min` from the strip's overscan gap during scanning.
+    pub auto_calibrate_dmin: bool,
+    /// User-saved calibrated roll profiles loaded from disk.
+    pub saved_rolls: Vec<RollProfile>,
 
     // Advanced Controls
     pub show_setup_modal: bool,
@@ -63,6 +67,8 @@ impl Default for ScanSetupState {
             output_dir_str: "./scans".into(),
             film_stock_index: 0,
             roll_profile: RollProfile::pro_image_100(),
+            auto_calibrate_dmin: false,
+            saved_rolls: Vec::new(),
             show_setup_modal: false,
             show_advanced: false,
             samples: 1,
@@ -79,9 +85,9 @@ impl ScanSetupState {
     /// Creates a scan setup configured for a specific roll profile.
     pub fn for_roll(roll: RollProfile) -> Self {
         let film_stock_index = match roll.id.0.as_str() {
-            "kodak-pro-image-100" => 0,
-            "kodak-portra-400" => 1,
-            "kodak-gold-200" => 2,
+            "kodak-pro-image-100" if roll == RollProfile::pro_image_100() => 0,
+            "kodak-portra-400" if !roll.is_calibrated() => 1,
+            "kodak-gold-200" if !roll.is_calibrated() => 2,
             _ => 3,
         };
         Self {
@@ -94,6 +100,18 @@ impl ScanSetupState {
     /// Updates the selected preset film stock index and updates the internal roll profile.
     pub fn set_film_stock_index(&mut self, index: usize) {
         self.film_stock_index = index;
+        let target_id = match index {
+            0 => Some("kodak-pro-image-100"),
+            1 => Some("kodak-portra-400"),
+            2 => Some("kodak-gold-200"),
+            _ => None,
+        };
+        if let Some(id) = target_id
+            && let Some(saved) = self.saved_rolls.iter().find(|r| r.id.0 == id)
+        {
+            self.roll_profile = saved.clone();
+            return;
+        }
         self.roll_profile = match index {
             0 => RollProfile::pro_image_100(),
             1 => RollProfile::portra_400(),
@@ -305,20 +323,32 @@ impl ReviewApp {
         .with_offset_mm(self.scan_setup.scanner_offset_mm)
     }
 
+    /// Loads user-saved calibrated roll profiles from disk into `scan_setup.saved_rolls`.
+    pub fn load_saved_calibrations(mut self) -> Self {
+        self.scan_setup.saved_rolls = RollProfile::load_user_calibrated_rolls();
+        self
+    }
+
     /// Triggers a scan using the current GUI configuration settings.
     pub fn start_scan(&mut self) {
-        let req = self.build_scan_request();
+        let mut req = self.build_scan_request();
         if let Err(err) = req.validate() {
             self.status_message = format!("Invalid scan settings: {err}");
             return;
         }
-        if let Some(roll) = &req.roll {
-            if !roll.is_calibrated() {
+        if let Some(roll) = &mut req.roll {
+            if !roll.is_calibrated() && !self.scan_setup.auto_calibrate_dmin {
                 self.status_message = format!(
                     "Cannot scan: film stock '{}' is uncalibrated (D-min calibration required)",
                     roll.name
                 );
                 return;
+            }
+            if self.scan_setup.auto_calibrate_dmin && roll.is_calibrated() {
+                // Force HardwareScannerBackend to estimate fresh D-min from this strip's overscan gap
+                let mut uncal = roll.clone();
+                uncal.calibration = None;
+                *roll = uncal;
             }
             self.session.roll = roll.clone();
         }
@@ -457,6 +487,22 @@ impl ReviewApp {
                                 self.scan_setup.set_film_stock_index(2);
                                 self.session.roll = self.scan_setup.selected_roll();
                             }
+                            for saved in self.scan_setup.saved_rolls.clone() {
+                                if !matches!(
+                                    saved.id.0.as_str(),
+                                    "kodak-pro-image-100" | "kodak-portra-400" | "kodak-gold-200"
+                                ) && ui
+                                    .selectable_label(
+                                        self.scan_setup.roll_profile.id == saved.id,
+                                        format!("Saved: {}", saved.name),
+                                    )
+                                    .clicked()
+                                {
+                                    self.scan_setup.film_stock_index = 3;
+                                    self.scan_setup.roll_profile = saved.clone();
+                                    self.session.roll = saved;
+                                }
+                            }
                             if self.scan_setup.film_stock_index > 2 {
                                 let label =
                                     format!("Custom: {}", self.scan_setup.roll_profile.name);
@@ -465,15 +511,19 @@ impl ReviewApp {
                         });
                 });
 
-                let (status_text, status_color) = if self.scan_setup.selected_roll().is_calibrated()
-                {
+                let (status_text, status_color) = if self.scan_setup.auto_calibrate_dmin {
+                    (
+                        "Will auto-estimate D-min from strip rebate on scan",
+                        Color32::from_rgb(120, 220, 255),
+                    )
+                } else if self.scan_setup.selected_roll().is_calibrated() {
                     (
                         "Measured roll profile loaded",
                         Color32::from_rgb(120, 220, 120),
                     )
                 } else {
                     (
-                        "D-min calibration required",
+                        "D-min calibration required (check auto-calibrate below)",
                         Color32::from_rgb(255, 180, 100),
                     )
                 };
@@ -481,6 +531,10 @@ impl ReviewApp {
                     ui.label("Calibration:");
                     ui.colored_label(status_color, status_text);
                 });
+                ui.checkbox(
+                    &mut self.scan_setup.auto_calibrate_dmin,
+                    "Auto-calibrate D-min from strip film rebate during scan",
+                );
 
                 ui.add_space(8.0);
                 ui.collapsing("▶ Advanced Scanner Controls", |ui| {
@@ -576,7 +630,8 @@ impl ReviewApp {
 
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    let is_calibrated = self.scan_setup.selected_roll().is_calibrated();
+                    let is_calibrated = self.scan_setup.selected_roll().is_calibrated()
+                        || self.scan_setup.auto_calibrate_dmin;
                     let can_scan = self.worker.is_some() && is_calibrated;
                     let start_btn =
                         Button::new(RichText::new("▶ Start Scan").color(Color32::WHITE).strong())
@@ -590,11 +645,9 @@ impl ReviewApp {
                             Color32::from_rgb(200, 160, 100),
                             "(No scanner connected)",
                         );
-                    } else if !is_calibrated {
-                        ui.colored_label(
-                            Color32::from_rgb(255, 180, 100),
-                            "(D-min calibration required)",
-                        );
+                    } else if !is_calibrated && ui.button("⚡ Auto-Calibrate & Scan").clicked() {
+                        self.scan_setup.auto_calibrate_dmin = true;
+                        self.start_scan();
                     }
 
                     if ui.button("Close").clicked() {
@@ -705,7 +758,8 @@ impl eframe::App for ReviewApp {
                             w.stop_after_current();
                         }
                     } else {
-                        let is_calibrated = self.scan_setup.selected_roll().is_calibrated();
+                        let is_calibrated = self.scan_setup.selected_roll().is_calibrated()
+                            || self.scan_setup.auto_calibrate_dmin;
                         let scan_btn =
                             Button::new(RichText::new("▶ Scan Strip").color(if is_calibrated {
                                 Color32::from_rgb(120, 240, 120)
@@ -713,6 +767,10 @@ impl eframe::App for ReviewApp {
                                 Color32::from_rgb(160, 160, 160)
                             }));
                         if ui.add_enabled(is_calibrated, scan_btn).clicked() {
+                            self.start_scan();
+                        }
+                        if !is_calibrated && ui.button("⚡ Auto-Calibrate & Scan").clicked() {
+                            self.scan_setup.auto_calibrate_dmin = true;
                             self.start_scan();
                         }
                         if ui.button("⚙ Setup").clicked() {
@@ -858,37 +916,145 @@ impl eframe::App for ReviewApp {
 
         // Right Advanced Parameters Drawer
         let mut params_changed = false;
+        let mut auto_sample_strip_dmin = false;
+        let mut apply_dmin_to_strip: Option<[f32; 3]> = None;
+        let mut save_film_calibration = false;
+        let mut toggle_uncropped: Option<bool> = None;
 
         Panel::right("advanced_drawer")
             .resizable(true)
-            .default_size(280.0)
+            .default_size(300.0)
             .show(ui, |ui| {
                 ui.add_space(8.0);
                 ui.heading("Parameters");
                 ui.separator();
 
                 let roll_is_calibrated = self.session.roll.is_calibrated();
+                let mut picker_mode = self.session.picker_mode;
                 if let Some(frame) = self.session.current_frame_mut() {
+                    let has_artifact = frame.source_artifact.is_some();
+                    let mut show_uncropped = frame.show_uncropped_master;
                     ScrollArea::vertical().show(ui, |ui| {
-                        ui.collapsing("Film Substrate (D-min)", |ui| {
-                            if roll_is_calibrated {
-                                ui.label(format!(
-                                    "R: {:.4}  G: {:.4}  B: {:.4}",
-                                    frame.params.dmin[0],
-                                    frame.params.dmin[1],
-                                    frame.params.dmin[2]
-                                ));
-                                ui.colored_label(
-                                    Color32::from_rgb(120, 220, 120),
-                                    "Measured roll profile loaded",
-                                );
-                            } else {
-                                ui.colored_label(
-                                    Color32::from_rgb(255, 180, 100),
-                                    "D-min calibration required",
-                                );
-                            }
-                        });
+                        egui::CollapsingHeader::new("Film Substrate (D-min)")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                if roll_is_calibrated {
+                                    ui.colored_label(
+                                        Color32::from_rgb(120, 220, 120),
+                                        "✓ Calibrated roll profile active",
+                                    );
+                                } else {
+                                    ui.colored_label(
+                                        Color32::from_rgb(255, 180, 100),
+                                        "⚠ Uncalibrated film stock",
+                                    );
+                                }
+
+                                let mut dmin_edited = false;
+                                ui.horizontal(|ui| {
+                                    ui.label("R:");
+                                    if ui
+                                        .add(
+                                            Slider::new(&mut frame.params.dmin[0], 0.05..=1.20)
+                                                .step_by(0.001),
+                                        )
+                                        .changed()
+                                    {
+                                        dmin_edited = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("G:");
+                                    if ui
+                                        .add(
+                                            Slider::new(&mut frame.params.dmin[1], 0.05..=1.20)
+                                                .step_by(0.001),
+                                        )
+                                        .changed()
+                                    {
+                                        dmin_edited = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("B:");
+                                    if ui
+                                        .add(
+                                            Slider::new(&mut frame.params.dmin[2], 0.05..=1.20)
+                                                .step_by(0.001),
+                                        )
+                                        .changed()
+                                    {
+                                        dmin_edited = true;
+                                    }
+                                });
+                                if dmin_edited {
+                                    frame.recalculate_downstream();
+                                    params_changed = true;
+                                }
+
+                                ui.add_space(4.0);
+                                if ui
+                                    .add_enabled(
+                                        has_artifact,
+                                        Button::new("⚡ Auto-Sample D-min from Strip Gap"),
+                                    )
+                                    .on_hover_text(
+                                        "Estimate D-min from the unexposed film gap in the raw scan",
+                                    )
+                                    .clicked()
+                                {
+                                    auto_sample_strip_dmin = true;
+                                }
+
+                                ui.horizontal(|ui| {
+                                    let is_dmin_picker = picker_mode == PickerMode::FilmBaseDmin;
+                                    let picker_label = if is_dmin_picker {
+                                        "🎯 Picking Film Base (Click to exit)"
+                                    } else {
+                                        "🎯 Pick Film Base on Canvas"
+                                    };
+                                    if ui.selectable_label(is_dmin_picker, picker_label).clicked() {
+                                        picker_mode = if is_dmin_picker {
+                                            PickerMode::HighlightWb
+                                        } else {
+                                            PickerMode::FilmBaseDmin
+                                        };
+                                    }
+                                });
+
+                                if has_artifact
+                                    && ui
+                                        .checkbox(
+                                            &mut show_uncropped,
+                                            "🖼 Show Uncropped Master (Film Gap)",
+                                        )
+                                        .changed()
+                                {
+                                    toggle_uncropped = Some(show_uncropped);
+                                }
+
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .button("Apply D-min to Strip")
+                                        .on_hover_text(
+                                            "Apply current D-min across all frames in this strip",
+                                        )
+                                        .clicked()
+                                    {
+                                        apply_dmin_to_strip = Some(frame.params.dmin);
+                                    }
+                                    if ui
+                                        .button("💾 Save Calibration")
+                                        .on_hover_text(
+                                            "Save calibrated D-min for this film stock to disk",
+                                        )
+                                        .clicked()
+                                    {
+                                        apply_dmin_to_strip = Some(frame.params.dmin);
+                                        save_film_calibration = true;
+                                    }
+                                });
+                            });
 
                         ui.add_space(4.0);
                         ui.label(RichText::new("Negative Properties").strong());
@@ -1066,7 +1232,69 @@ impl eframe::App for ReviewApp {
                         ui.small(format!("Relative EV: {ev:+.2} EV"));
                     });
                 }
+                self.session.picker_mode = picker_mode;
             });
+
+        if let Some(show_uncropped) = toggle_uncropped {
+            self.session
+                .set_current_show_uncropped_master(show_uncropped);
+            params_changed = true;
+        }
+
+        if auto_sample_strip_dmin {
+            if let Some(dmin) = self.session.auto_calibrate_strip_dmin_from_overscan() {
+                self.scan_setup.roll_profile = self.session.roll.clone();
+                self.save_notification = Some((
+                    format!(
+                        "Auto-sampled D-min from strip gap ({:.4}, {:.4}, {:.4})",
+                        dmin[0], dmin[1], dmin[2]
+                    ),
+                    Instant::now(),
+                ));
+                params_changed = true;
+            } else {
+                self.save_notification = Some((
+                    "Could not detect unexposed film gap in this frame".into(),
+                    Instant::now(),
+                ));
+            }
+        }
+
+        if let Some(dmin) = apply_dmin_to_strip
+            && self.session.apply_dmin_to_strip(dmin).is_ok()
+        {
+            self.scan_setup.roll_profile = self.session.roll.clone();
+            if !save_film_calibration {
+                self.save_notification = Some((
+                    format!(
+                        "Applied D-min ({:.4}, {:.4}, {:.4}) to strip",
+                        dmin[0], dmin[1], dmin[2]
+                    ),
+                    Instant::now(),
+                ));
+            }
+            params_changed = true;
+        }
+
+        if save_film_calibration {
+            match self.session.roll.save_to_user_config() {
+                Ok(path) => {
+                    self.scan_setup.saved_rolls = RollProfile::load_user_calibrated_rolls();
+                    let filename = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "roll.json".into());
+                    self.save_notification = Some((
+                        format!("Saved film calibration ({filename})"),
+                        Instant::now(),
+                    ));
+                }
+                Err(e) => {
+                    self.save_notification =
+                        Some((format!("Calibration save failed: {e}"), Instant::now()));
+                }
+            }
+        }
 
         if params_changed {
             self.invalidate_texture();
@@ -1107,7 +1335,8 @@ impl ReviewApp {
                         );
                         ui.add_space(12.0);
                         ui.horizontal(|ui| {
-                            let is_calibrated = self.scan_setup.selected_roll().is_calibrated();
+                            let is_calibrated = self.scan_setup.selected_roll().is_calibrated()
+                                || self.scan_setup.auto_calibrate_dmin;
                             let can_scan = self.worker.is_some() && is_calibrated;
                             let scan_btn = Button::new(
                                 RichText::new("▶ Scan Strip").color(Color32::WHITE).strong(),
@@ -1121,11 +1350,11 @@ impl ReviewApp {
                                     Color32::from_rgb(200, 160, 100),
                                     "(No scanner connected)",
                                 );
-                            } else if !is_calibrated {
-                                ui.colored_label(
-                                    Color32::from_rgb(255, 180, 100),
-                                    "(D-min calibration required)",
-                                );
+                            } else if !is_calibrated
+                                && ui.button("⚡ Auto-Calibrate & Scan").clicked()
+                            {
+                                self.scan_setup.auto_calibrate_dmin = true;
+                                self.start_scan();
                             }
                             if ui.button("⚙ Scan Settings").clicked() {
                                 self.scan_setup.show_setup_modal = true;
@@ -1224,7 +1453,18 @@ impl ReviewApp {
         }
 
         if let Some(sel) = committed_selection {
-            if let Some(frame) = self.session.current_frame_mut() {
+            if self.session.picker_mode == PickerMode::FilmBaseDmin {
+                if let Some(dmin) = self.session.apply_current_dmin_selection(sel) {
+                    self.scan_setup.roll_profile = self.session.roll.clone();
+                    self.save_notification = Some((
+                        format!(
+                            "Sampled Film Base D-min ({:.4}, {:.4}, {:.4})",
+                            dmin[0], dmin[1], dmin[2]
+                        ),
+                        Instant::now(),
+                    ));
+                }
+            } else if let Some(frame) = self.session.current_frame_mut() {
                 frame.apply_highlight_wb_selection(sel);
             }
             self.invalidate_texture();
@@ -1245,8 +1485,12 @@ impl ReviewApp {
                 Color32::from_rgba_unmultiplied(255, 230, 80, 40),
             );
         } else if let Some(frame) = self.session.current_frame() {
-            // Draw existing committed highlight WB selection
-            if let Some(sel) = frame.highlight_wb_rect {
+            let active_sel = if self.session.picker_mode == PickerMode::FilmBaseDmin {
+                frame.dmin_rect
+            } else {
+                frame.highlight_wb_rect
+            };
+            if let Some(sel) = active_sel {
                 let u0 = sel.x as f32 / img_w;
                 let v0 = sel.y as f32 / img_h;
                 let u1 = (sel.x + sel.width) as f32 / img_w;
@@ -1263,40 +1507,76 @@ impl ReviewApp {
                     ),
                 );
 
+                let stroke_color = if self.session.picker_mode == PickerMode::FilmBaseDmin {
+                    Color32::from_rgb(255, 180, 80)
+                } else {
+                    Color32::from_rgb(80, 220, 255)
+                };
                 painter.rect_stroke(
                     rect,
                     CornerRadius::ZERO,
-                    Stroke::new(2.0, Color32::from_rgb(80, 220, 255)),
+                    Stroke::new(2.0, stroke_color),
                     StrokeKind::Outside,
                 );
                 painter.rect_filled(
                     rect,
                     CornerRadius::ZERO,
-                    Color32::from_rgba_unmultiplied(80, 220, 255, 40),
+                    Color32::from_rgba_unmultiplied(
+                        stroke_color.r(),
+                        stroke_color.g(),
+                        stroke_color.b(),
+                        40,
+                    ),
                 );
             }
         }
 
         // Status banner
         if let Some(frame) = self.session.current_frame() {
-            let status_text = match frame.selection_status {
-                SelectionStatus::None => "Drag rectangle on a neutral highlight".to_string(),
-                SelectionStatus::Valid => format!(
-                    "✓ Highlight WB: {:.2} / {:.2} / {:.2}",
-                    frame.params.wb_high[0], frame.params.wb_high[1], frame.params.wb_high[2]
-                ),
-                SelectionStatus::TooSmall { width, height } => {
-                    format!("⚠ Selection too small ({width}x{height}, minimum 4x4)")
+            let is_dmin_picker = self.session.picker_mode == PickerMode::FilmBaseDmin;
+            let status_text = if is_dmin_picker {
+                match frame.selection_status {
+                    SelectionStatus::None => {
+                        "🎯 Film Base Mode: Drag rectangle on unexposed film rebate / gap"
+                            .to_string()
+                    }
+                    SelectionStatus::Valid => format!(
+                        "✓ Film Base D-min: {:.4} / {:.4} / {:.4}",
+                        frame.params.dmin[0], frame.params.dmin[1], frame.params.dmin[2]
+                    ),
+                    SelectionStatus::TooSmall { width, height } => {
+                        format!("⚠ Selection too small ({width}x{height}, minimum 4x4)")
+                    }
+                    SelectionStatus::TooDark => {
+                        "⚠ Selected area is dark adapter mask; pick unexposed film rebate"
+                            .to_string()
+                    }
+                    SelectionStatus::Clipped => {
+                        "⚠ Selected area is out of valid D-min range".to_string()
+                    }
                 }
-                SelectionStatus::TooDark => {
-                    "⚠ Selected area is in shadows; choose a bright neutral highlight".to_string()
-                }
-                SelectionStatus::Clipped => {
-                    "⚠ Selected area is sensor-clipped; pick an unclipped highlight".to_string()
+            } else {
+                match frame.selection_status {
+                    SelectionStatus::None => "Drag rectangle on a neutral highlight".to_string(),
+                    SelectionStatus::Valid => format!(
+                        "✓ Highlight WB: {:.2} / {:.2} / {:.2}",
+                        frame.params.wb_high[0], frame.params.wb_high[1], frame.params.wb_high[2]
+                    ),
+                    SelectionStatus::TooSmall { width, height } => {
+                        format!("⚠ Selection too small ({width}x{height}, minimum 4x4)")
+                    }
+                    SelectionStatus::TooDark => {
+                        "⚠ Selected area is in shadows; choose a bright neutral highlight"
+                            .to_string()
+                    }
+                    SelectionStatus::Clipped => {
+                        "⚠ Selected area is sensor-clipped; pick an unclipped highlight".to_string()
+                    }
                 }
             };
 
             let banner_color = match frame.selection_status {
+                SelectionStatus::None if is_dmin_picker => Color32::from_rgb(255, 200, 100),
                 SelectionStatus::None => Color32::from_rgb(180, 180, 180),
                 SelectionStatus::Valid => Color32::from_rgb(100, 240, 120),
                 SelectionStatus::TooSmall { .. }
@@ -1306,7 +1586,7 @@ impl ReviewApp {
 
             let banner_rect = Rect::from_min_size(
                 Pos2::new(canvas_rect.left() + 16.0, canvas_rect.top() + 16.0),
-                vec2(400.0, 32.0),
+                vec2(460.0, 32.0),
             );
             painter.rect_filled(
                 banner_rect,

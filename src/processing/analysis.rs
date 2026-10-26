@@ -213,6 +213,27 @@ impl WorkingImage {
             pixels: downscaled_pixels,
         }
     }
+
+    /// Computes channel statistics over a safe interior region (excluding a 5% border inset
+    /// on images at least 64×64 pixels) so residual SA-21 adapter mask edges or uncropped film
+    /// rebate slivers at the border do not skew whole-frame `min`/`max` extrema.
+    ///
+    /// On small synthetic or fixture images (< 64 pixels on either axis), samples the full image.
+    pub fn sample_interior_extrema(&self) -> ImageSampleStats {
+        if self.width >= 64 && self.height >= 64 {
+            let inset_x = (self.width / 20).max(2);
+            let inset_y = (self.height / 20).max(2);
+            let rect = SampleRect::new(
+                inset_x,
+                inset_y,
+                self.width.saturating_sub(inset_x * 2),
+                self.height.saturating_sub(inset_y * 2),
+            );
+            self.sample_region(Some(rect))
+        } else {
+            self.sample_region(None)
+        }
+    }
 }
 
 /// Technical analysis results computed prior to white-balance calibration.
@@ -231,10 +252,128 @@ pub fn analyse_pre_white_balance(
     roll: &RollProfile,
 ) -> Result<TechnicalAnalysis, RollProfileError> {
     let dmin = roll.dmin().ok_or(RollProfileError::UncalibratedRoll)?;
-    let stats = image.sample_region(None);
+    let stats = image.sample_interior_extrema();
     let dmax = auto_dmax(dmin, stats.min);
     let scan_bias = auto_scan_bias(dmin, dmax, stats.max);
     Ok(TechnicalAnalysis { dmax, scan_bias })
+}
+
+/// Samples a region of unexposed film base (rebate / inter-frame gap) to calibrate `D-min`.
+pub fn sample_dmin_region(
+    image: &WorkingImage,
+    rect: SampleRect,
+) -> Result<[f32; 3], RollProfileError> {
+    let stats = image.sample_region(Some(rect));
+    if stats.count == 0 {
+        return Err(RollProfileError::InvalidDmin {
+            channel: "RGB",
+            value: 0.0,
+            reason: "Empty sample region",
+        });
+    }
+    super::roll::validate_dmin(stats.mean)?;
+    Ok(stats.mean)
+}
+
+/// Automatically estimates linear working-space `D-min` from the unexposed inter-frame gap
+/// (overscan columns) of a raw `FrameArtifact`.
+///
+/// Inspects the overscan columns outside the cropped frame (or the outer 12% travel columns
+/// when uncropped) across the central 50% vertical rows (safely inside the SA-21 aperture),
+/// selects the brightest unclipped film-base columns, and transforms their mean 16-bit sensor
+/// RGB into linear Rec.2020 working space.
+pub fn estimate_dmin_from_overscan(
+    artifact: &crate::scanner::types::FrameArtifact,
+    color_transform: &impl ColorTransform,
+) -> Option<[f32; 3]> {
+    let rows = artifact.pass.rows;
+    let cols = artifact.pass.cols;
+    if rows == 0 || cols < 4 || artifact.samples.colors.len() < 3 {
+        return None;
+    }
+
+    let r_plane = &artifact.samples.colors[0];
+    let g_plane = &artifact.samples.colors[1];
+    let b_plane = &artifact.samples.colors[2];
+    let total_pixels = rows * cols;
+    if r_plane.len() < total_pixels || g_plane.len() < total_pixels || b_plane.len() < total_pixels
+    {
+        return None;
+    }
+
+    let row_start = rows / 4;
+    let row_end = (rows * 3 / 4).max(row_start + 1).min(rows);
+    let row_count = (row_end - row_start) as u64;
+
+    // Candidate travel columns: prefer overscan outside `artifact.crop`, falling back to outer 12% edges
+    let mut candidate_cols: Vec<usize> = Vec::new();
+    if let Some(ref crop) = artifact.crop
+        && crop.accepted
+    {
+        let left_end = crop.columns.0.saturating_sub(1).min(cols);
+        let right_start = (crop.columns.1 + 1).min(cols);
+        candidate_cols.extend(0..left_end);
+        candidate_cols.extend(right_start..cols);
+    }
+    if candidate_cols.is_empty() {
+        let edge_span = (cols / 8).clamp(1, cols / 2);
+        candidate_cols.extend(0..edge_span);
+        candidate_cols.extend(cols.saturating_sub(edge_span)..cols);
+    }
+
+    // Compute per-column average [R, G, B] in 16-bit sensor space over central rows
+    let mut col_averages: Vec<([u16; 3], u64)> = Vec::with_capacity(candidate_cols.len());
+    for col in candidate_cols {
+        let mut r_sum = 0u64;
+        let mut g_sum = 0u64;
+        let mut b_sum = 0u64;
+        for row in row_start..row_end {
+            let idx = row * cols + col;
+            r_sum += r_plane[idx] as u64;
+            g_sum += g_plane[idx] as u64;
+            b_sum += b_plane[idx] as u64;
+        }
+        let r_avg = (r_sum / row_count) as u16;
+        let g_avg = (g_sum / row_count) as u16;
+        let b_avg = (b_sum / row_count) as u16;
+        let luma = r_avg as u64 + g_avg as u64 + b_avg as u64;
+        // Exclude black adapter mask (< 1500 per channel) and hard sensor saturation
+        if luma >= 4500 && r_avg < 65500 && g_avg < 65500 && b_avg < 65500 {
+            col_averages.push(([r_avg, g_avg, b_avg], luma));
+        }
+    }
+
+    if col_averages.is_empty() {
+        return None;
+    }
+
+    // Sort by transmission luminance descending: unexposed film base has the highest transmission
+    col_averages.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let top_n = (col_averages.len() / 3).clamp(1, 16);
+    let mut r_acc = 0u64;
+    let mut g_acc = 0u64;
+    let mut b_acc = 0u64;
+    for &(rgb, _) in &col_averages[..top_n] {
+        r_acc += rgb[0] as u64;
+        g_acc += rgb[1] as u64;
+        b_acc += rgb[2] as u64;
+    }
+    let mean_u16 = [
+        (r_acc / top_n as u64) as u16,
+        (g_acc / top_n as u64) as u16,
+        (b_acc / top_n as u64) as u16,
+    ];
+
+    let linear_dmin = color_transform.transform_u16_rgb(mean_u16);
+    if super::roll::validate_dmin(linear_dmin).is_ok()
+        && linear_dmin[0] >= 0.05
+        && linear_dmin[1] >= 0.05
+        && linear_dmin[2] >= 0.05
+    {
+        Some(linear_dmin)
+    } else {
+        None
+    }
 }
 
 /// Samples a neutral highlight patch to derive illuminant white balance.
@@ -266,7 +405,7 @@ pub fn sample_shadow_wb(
 /// Stage 2 analysis: Completes parameter calculation after white balance has been established,
 /// computing paper black and print exposure adjustment over the full cropped image.
 pub fn finish_after_white_balance(image: &WorkingImage, params: &mut NegadoctorParams) {
-    let stats = image.sample_region(None);
+    let stats = image.sample_interior_extrema();
     params.paper_black = auto_paper_black(
         params.dmin,
         params.dmax,
@@ -430,5 +569,122 @@ mod tests {
         assert_eq!(no_change.width, 4);
         assert_eq!(no_change.height, 4);
         assert_eq!(no_change.pixels, img.pixels);
+    }
+
+    #[test]
+    fn interior_extrema_ignores_border_mask_and_rebate_on_real_frames() {
+        let roll = RollProfile::pro_image_100();
+        let width = 100;
+        let height = 100;
+        let mut pixels = Vec::with_capacity(width * height);
+        for y in 0..height {
+            for x in 0..width {
+                let is_border = !(3..97).contains(&x) || !(3..97).contains(&y);
+                if is_border {
+                    // Simulate black SA-21 mask rail (0.00005) on top/bottom and bright rebate (0.89) on left/right
+                    if !(3..97).contains(&y) {
+                        pixels.push([0.00005, 0.00005, 0.00005]);
+                    } else {
+                        pixels.push([0.89, 0.90, 0.88]);
+                    }
+                } else if x == 50 && y == 50 {
+                    pixels.push([0.005, 0.006, 0.007]); // interior highlight
+                } else if x == 60 && y == 60 {
+                    pixels.push([0.35, 0.36, 0.34]); // interior shadow
+                } else {
+                    pixels.push([0.08, 0.09, 0.10]);
+                }
+            }
+        }
+        let img = WorkingImage::new(width, height, pixels);
+        let stats = img.sample_interior_extrema();
+        assert!((stats.min[0] - 0.005).abs() < 1e-5);
+        assert!((stats.max[0] - 0.35).abs() < 1e-5);
+
+        let tech = analyse_pre_white_balance(&img, &roll).unwrap();
+        // Should match interior min=0.005, max=0.35 rather than the 0.00005 border mask!
+        assert!(
+            tech.dmax < 2.5,
+            "Border mask must not spike D-max: {}",
+            tech.dmax
+        );
+    }
+
+    #[test]
+    fn estimate_dmin_from_overscan_recovers_film_base_transmission() {
+        use crate::processing::color::ScannerColorPipeline;
+        use crate::scanner::types::{FrameArtifact, ScanMetadata};
+
+        let pipeline = ScannerColorPipeline::default_ls40().unwrap();
+        let rows = 40;
+        let cols = 100;
+        let mut r_plane = Vec::with_capacity(rows * cols);
+        let mut g_plane = Vec::with_capacity(rows * cols);
+        let mut b_plane = Vec::with_capacity(rows * cols);
+
+        for _ in 0..rows {
+            for col in 0..cols {
+                // Columns 0..10 and 90..100: unexposed film base gap (bright orange mask)
+                if !(10..90).contains(&col) {
+                    r_plane.push(52000u16);
+                    g_plane.push(44000u16);
+                    b_plane.push(36000u16);
+                } else {
+                    // Exposed negative image area (denser, lower transmission)
+                    r_plane.push(12000u16);
+                    g_plane.push(10000u16);
+                    b_plane.push(8000u16);
+                }
+            }
+        }
+
+        let artifact = FrameArtifact {
+            frame_number: 1,
+            total_frames: 6,
+            dpi: 725,
+            raw_rect: nkscan::protocol::data::Rect {
+                left: 0,
+                right: cols as u32,
+                top: 0,
+                bottom: rows as u32,
+            },
+            samples: nkscan::protocol::decode::Samples {
+                colors: vec![r_plane, g_plane, b_plane],
+                ir: None,
+            },
+            pass: nkscan::scan::pass::Pass {
+                layout: nkscan::protocol::image::Layout::single_line(
+                    rows as u32,
+                    cols as u32,
+                    vec![1, 2, 3],
+                ),
+                cooperation: Vec::new(),
+                complete: true,
+                blocks: 1,
+                rows,
+                cols,
+            },
+            crop: None,
+            scan_metadata: ScanMetadata {
+                scanner_model: None,
+                focus_position: None,
+                exposures: None,
+                hardware_samples: 1,
+                software_passes: 1,
+                infrared_cleaned_pixels: None,
+            },
+            roll: None,
+        };
+
+        let expected = pipeline.transform_u16_rgb([52000, 44000, 36000]);
+        let estimated = estimate_dmin_from_overscan(&artifact, &pipeline).unwrap();
+        for c in 0..3 {
+            assert!(
+                (estimated[c] - expected[c]).abs() < 1e-4,
+                "Channel {c} mismatch: got {}, expected {}",
+                estimated[c],
+                expected[c]
+            );
+        }
     }
 }

@@ -517,6 +517,67 @@ impl RollProfile {
         let content = std::fs::read_to_string(path).map_err(RollProfileError::Io)?;
         Self::from_json(&content)
     }
+
+    /// Returns a calibrated copy of this roll profile with the given empirical `D-min` values.
+    pub fn with_measured_dmin(
+        &self,
+        dmin: [f32; 3],
+        notes: Option<String>,
+    ) -> Result<Self, RollProfileError> {
+        let calibration = RollCalibration::new(dmin, self.scanner_profile(), None, notes)?;
+        let updated_name = if self.name.contains("(Uncalibrated)") {
+            self.name.replace("(Uncalibrated)", "(Calibrated)")
+        } else {
+            self.name.clone()
+        };
+        Self::new(
+            self.id.clone(),
+            updated_name,
+            self.film_stock.clone(),
+            Some(calibration),
+        )
+    }
+
+    /// Saves this roll profile into the user's persistent roll calibration directory
+    /// (`<app_config_dir>/rolls/<id>.json`).
+    pub fn save_to_user_config(&self) -> Result<std::path::PathBuf, RollProfileError> {
+        let dir = crate::diagnostics::resolve_app_config_dir().join("rolls");
+        std::fs::create_dir_all(&dir).map_err(RollProfileError::Io)?;
+        let safe_id: String = self
+            .id
+            .0
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let path = dir.join(format!("{safe_id}.json"));
+        self.save_to_file(&path)?;
+        Ok(path)
+    }
+
+    /// Loads all user-saved calibrated roll profiles from `<app_config_dir>/rolls/*.json`.
+    pub fn load_user_calibrated_rolls() -> Vec<Self> {
+        let dir = crate::diagnostics::resolve_app_config_dir().join("rolls");
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut rolls = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json")
+                && let Ok(profile) = Self::load_from_file(&path)
+                && profile.is_calibrated()
+            {
+                rolls.push(profile);
+            }
+        }
+        rolls
+    }
 }
 
 /// Conservatively determines whether legacy D-min values represent verified empirical calibration.
@@ -633,6 +694,27 @@ impl PreparedFrame {
             highlight_wb_rect: None,
             working_image: Some(working_image),
         })
+    }
+
+    /// Prepares a frame from an artifact, automatically estimating `D-min` from the strip's
+    /// overscan rebate if the supplied `RollProfile` is uncalibrated.
+    pub fn from_artifact_with_auto_dmin(
+        source: FrameArtifact,
+        roll: RollProfile,
+        pipeline: &impl ColorTransform,
+    ) -> Result<Self, ColorError> {
+        let effective_roll = if roll.is_calibrated() {
+            roll
+        } else {
+            let estimated_dmin =
+                crate::processing::analysis::estimate_dmin_from_overscan(&source, pipeline)
+                    .unwrap_or([0.8965, 0.9093, 0.8816]);
+            roll.with_measured_dmin(
+                estimated_dmin,
+                Some("Auto-calibrated from strip overscan".into()),
+            )?
+        };
+        Self::from_artifact(source, effective_roll, pipeline)
     }
 
     /// Generates the Darktable XMP sidecar for this prepared frame.

@@ -548,17 +548,10 @@ impl ScannerBackend for HardwareScannerBackend {
             }
         };
 
-        let roll = request
+        let mut roll = request
             .roll
             .clone()
             .unwrap_or_else(|| self.roll_profile.clone());
-        if !roll.is_calibrated() {
-            emit(WorkerMessage::Error(format!(
-                "Cannot scan with uncalibrated roll '{}': D-min calibration required",
-                roll.id
-            )));
-            return;
-        }
 
         let default_pipeline;
         let pipeline: &ScannerColorPipeline = match &self.color_pipeline {
@@ -589,8 +582,15 @@ impl ScannerBackend for HardwareScannerBackend {
                     (emit_cell.borrow_mut())(WorkerMessage::Event(evt));
                 },
                 |artifact| {
-                    match PreparedFrame::from_artifact(artifact, roll.clone(), pipeline) {
+                    match PreparedFrame::from_artifact_with_auto_dmin(
+                        artifact,
+                        roll.clone(),
+                        pipeline,
+                    ) {
                         Ok(prepared) => {
+                            if !roll.is_calibrated() && prepared.roll.is_calibrated() {
+                                roll = prepared.roll.clone();
+                            }
                             prepared_count += 1;
                             (emit_cell.borrow_mut())(WorkerMessage::FrameReady(Box::new(prepared)));
                         }

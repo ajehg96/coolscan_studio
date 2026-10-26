@@ -27,6 +27,35 @@ pub fn dots_to_mm(dots: u32, dpi: u16) -> f64 {
     f64::from(dots) * 25.4 / f64::from(dpi)
 }
 
+/// Computes the clamped overscan window length and per-frame top dot positions
+/// within `[y_origin, y_end]` so a final frame near `y_end` clamps cleanly
+/// rather than aborting overscan for the entire strip.
+pub fn compute_clamped_overscan_positions(
+    frame_cols: &[usize],
+    raw_len_dots: u32,
+    pitch: u32,
+    y_origin: u32,
+    y_end: u32,
+    y_limit: u32,
+) -> Option<(u32, Vec<u32>)> {
+    let max_span = y_end.saturating_sub(y_origin);
+    let length = raw_len_dots.saturating_add(240).min(y_limit).min(max_span);
+    if length == 0 || frame_cols.is_empty() {
+        return None;
+    }
+    let max_top = y_end.saturating_sub(length).max(y_origin);
+    let tops = frame_cols
+        .iter()
+        .map(|&col| {
+            y_origin
+                .saturating_add((col as u32).saturating_mul(pitch))
+                .saturating_sub(60)
+                .clamp(y_origin, max_top)
+        })
+        .collect();
+    Some((length, tops))
+}
+
 /// Sets up overscan frame boundaries using perforation registration (Type2) if supported.
 #[allow(clippy::too_many_arguments)]
 pub fn setup_overscan_frames(
@@ -53,22 +82,23 @@ pub fn setup_overscan_frames(
     let found =
         boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
 
-    let raw_len = u32::try_from(found.length).ok()?;
-    let raw_len_dots = raw_len.checked_mul(pitch)?;
-    let length = raw_len_dots.saturating_add(240).min(y_limit);
-    if length == 0 || found.frames.len() != discovery.frames.len() {
+    if found.frames.len() != discovery.frames.len() {
         return None;
     }
+    let raw_len = u32::try_from(found.length).ok()?;
+    let raw_len_dots = raw_len.checked_mul(pitch)?;
+    let (length, tops) = compute_clamped_overscan_positions(
+        &found.frames,
+        raw_len_dots,
+        pitch,
+        y_origin,
+        y_end,
+        y_limit,
+    )?;
     let perfs = session.read_perforations().ok()?;
-    let mut entries = Vec::new();
-    for col in &found.frames {
-        let top = y_origin
-            .saturating_add((*col as u32).saturating_mul(pitch))
-            .saturating_sub(60);
-        if top.saturating_add(length) > y_end {
-            return None;
-        }
-        let p = perfs.at(*col)?;
+    let mut entries = Vec::with_capacity(found.frames.len());
+    for (&col, top) in found.frames.iter().zip(tops) {
+        let p = perfs.at(col)?;
         entries.push(nkscan::protocol::data::FramePosition::new(top, p));
     }
     let table = BoundaryType2 { frames: entries };
@@ -139,22 +169,23 @@ pub fn configure_overscan(
     let found =
         boundaries::preserve_edges(&image, nominal as usize, boundaries::Polarity::Negative);
 
-    let raw_len = u32::try_from(found.length).ok()?;
-    let raw_len_dots = raw_len.checked_mul(pitch)?;
-    let length = raw_len_dots.saturating_add(240).min(y_limit);
-    if length == 0 || found.frames.len() != strip.detected_frames.len() {
+    if found.frames.len() != strip.detected_frames.len() {
         return None;
     }
+    let raw_len = u32::try_from(found.length).ok()?;
+    let raw_len_dots = raw_len.checked_mul(pitch)?;
+    let (length, tops) = compute_clamped_overscan_positions(
+        &found.frames,
+        raw_len_dots,
+        pitch,
+        y_origin,
+        y_end,
+        y_limit,
+    )?;
     let perfs = session.read_perforations().ok()?;
-    let mut entries = Vec::new();
-    for col in &found.frames {
-        let top = y_origin
-            .saturating_add((*col as u32).saturating_mul(pitch))
-            .saturating_sub(60);
-        if top.saturating_add(length) > y_end {
-            return None;
-        }
-        let p = perfs.at(*col)?;
+    let mut entries = Vec::with_capacity(found.frames.len());
+    for (&col, top) in found.frames.iter().zip(tops) {
+        let p = perfs.at(col)?;
         entries.push(nkscan::protocol::data::FramePosition::new(top, p));
     }
     let table = BoundaryType2 { frames: entries };
@@ -1357,5 +1388,25 @@ mod tests {
         assert_eq!(emitted, vec![1]);
         assert!(!refresh_called);
         assert_eq!(stop_reason.as_deref(), Some("Stopped after current frame"));
+    }
+
+    #[test]
+    fn test_compute_clamped_overscan_positions_preserves_strip_when_final_frame_near_y_end() {
+        // Real strip layout: starts=[5, 148, 292, 436, 581, 709], length=137 cols, pitch=30 dots
+        // raw_len_dots = 137 * 30 = 4110; overscan length = 4110 + 240 = 4350 (clamped to y_limit=4332)
+        // Frame 6 raw top = 709 * 30 - 60 = 21210; if y_end = 25500, 21210 + 4332 = 25542 > 25500.
+        let starts = [5usize, 148, 292, 436, 581, 709];
+        let (length, tops) =
+            compute_clamped_overscan_positions(&starts, 137 * 30, 30, 0, 25500, 4332).unwrap();
+
+        assert_eq!(length, 4332);
+        assert_eq!(tops.len(), 6);
+        assert_eq!(tops[0], 5 * 30 - 60);
+        assert_eq!(tops[4], 581 * 30 - 60);
+        // Frame 6 is clamped cleanly so top + length == y_end (25500 - 4332 = 21168)
+        assert_eq!(tops[5], 25500 - 4332);
+        for &top in &tops {
+            assert!(top + length <= 25500);
+        }
     }
 }

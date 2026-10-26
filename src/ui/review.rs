@@ -88,6 +88,16 @@ impl Default for NegadoctorModes {
     }
 }
 
+/// Interactive canvas rectangle picker mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum PickerMode {
+    /// Drag on a neutral positive highlight to calibrate illuminant white balance.
+    #[default]
+    HighlightWb,
+    /// Drag on unexposed film rebate / inter-frame gap to calibrate `D-min`.
+    FilmBaseDmin,
+}
+
 /// Review state for an individual film frame.
 #[derive(Debug, Clone)]
 pub struct ReviewFrameState {
@@ -109,12 +119,20 @@ pub struct ReviewFrameState {
     pub technical: TechnicalAnalysis,
     /// Highlight white-balance selection rectangle in preview coordinates.
     pub highlight_wb_rect: Option<SampleRect>,
+    /// Film-base D-min selection rectangle in preview coordinates.
+    pub dmin_rect: Option<SampleRect>,
     /// Status of the active highlight selection.
     pub selection_status: SelectionStatus,
     /// Whether the user has accepted this frame.
     pub accepted: bool,
+    /// Whether the preview canvas is showing the uncropped master artifact (including film gap).
+    pub show_uncropped_master: bool,
     /// Original scanner frame artifact if retained.
     pub source_artifact: Option<crate::scanner::types::FrameArtifact>,
+    /// Cached uncropped master working image when `show_uncropped_master` is toggled on.
+    uncropped_working_image: Option<WorkingImage>,
+    /// Cached downscaled uncropped preview image.
+    uncropped_preview_image: Option<WorkingImage>,
     /// Cached unoriented display sRGB pixels of the preview image.
     cached_srgb: Option<Vec<[u8; 3]>>,
     /// Cached oriented display sRGB RGBA8 pixels and preview dimensions.
@@ -139,7 +157,7 @@ impl ReviewFrameState {
 
         let preview_image = working_image.downscale_to_preview(1440);
 
-        let image_stats = working_image.sample_region(None);
+        let image_stats = working_image.sample_interior_extrema();
 
         Ok(Self {
             frame_number,
@@ -151,9 +169,13 @@ impl ReviewFrameState {
             image_stats,
             technical,
             highlight_wb_rect: None,
+            dmin_rect: None,
             selection_status: SelectionStatus::None,
             accepted: false,
+            show_uncropped_master: false,
             source_artifact: None,
+            uncropped_working_image: None,
+            uncropped_preview_image: None,
             cached_srgb: None,
             cached_preview: None,
         })
@@ -251,6 +273,124 @@ impl ReviewFrameState {
         self.invalidate_preview();
     }
 
+    /// Updates `D-min` for this frame, recalculates downstream parameters, and invalidates the preview.
+    pub fn set_dmin(&mut self, dmin: [f32; 3]) {
+        self.params.dmin = dmin;
+        self.recalculate_downstream();
+        self.invalidate_preview();
+    }
+
+    /// Estimates `D-min` from the unexposed film gap in `source_artifact` and applies it to this frame.
+    pub fn auto_calibrate_dmin_from_overscan(
+        &mut self,
+        color_pipeline: &ScannerColorPipeline,
+    ) -> Option<[f32; 3]> {
+        let artifact = self.source_artifact.as_ref()?;
+        let dmin =
+            crate::processing::analysis::estimate_dmin_from_overscan(artifact, color_pipeline)?;
+        self.set_dmin(dmin);
+        Some(dmin)
+    }
+
+    /// Toggles whether the preview displays the full uncropped master frame (including film gap).
+    pub fn set_show_uncropped_master(
+        &mut self,
+        show_uncropped: bool,
+        color_pipeline: &ScannerColorPipeline,
+    ) {
+        if self.show_uncropped_master == show_uncropped {
+            return;
+        }
+        if show_uncropped
+            && self.uncropped_working_image.is_none()
+            && let Some(ref artifact) = self.source_artifact
+            && let Ok(full_img) = WorkingImage::from_scanner_samples(
+                &artifact.samples,
+                &artifact.pass,
+                color_pipeline,
+            )
+        {
+            self.uncropped_preview_image = Some(full_img.downscale_to_preview(1440));
+            self.uncropped_working_image = Some(full_img);
+        }
+        self.show_uncropped_master = show_uncropped && self.uncropped_preview_image.is_some();
+        self.invalidate_preview();
+    }
+
+    /// Applies a film-base `D-min` selection rectangle drawn in preview coordinates.
+    pub fn apply_dmin_selection(
+        &mut self,
+        preview_rect: SampleRect,
+        color_pipeline: &ScannerColorPipeline,
+    ) -> Option<[f32; 3]> {
+        if preview_rect.width < 4 || preview_rect.height < 4 {
+            self.selection_status = SelectionStatus::TooSmall {
+                width: preview_rect.width,
+                height: preview_rect.height,
+            };
+            return None;
+        }
+
+        if self.show_uncropped_master && self.uncropped_working_image.is_none() {
+            self.set_show_uncropped_master(true, color_pipeline);
+        }
+
+        let (active_preview_w, active_preview_h, active_working) = if self.show_uncropped_master
+            && let (Some(up), Some(uw)) =
+                (&self.uncropped_preview_image, &self.uncropped_working_image)
+        {
+            (up.width, up.height, uw)
+        } else {
+            (
+                self.preview_image.width,
+                self.preview_image.height,
+                &self.working_image,
+            )
+        };
+
+        let preview_source = self.orientation.preview_rect_to_source_rect(
+            preview_rect,
+            active_preview_w,
+            active_preview_h,
+        );
+
+        let source_rect = if active_working.width == active_preview_w
+            && active_working.height == active_preview_h
+        {
+            preview_source
+        } else {
+            let scale_x = active_working.width as f64 / active_preview_w as f64;
+            let scale_y = active_working.height as f64 / active_preview_h as f64;
+            let mx = (preview_source.x as f64 * scale_x).round() as usize;
+            let my = (preview_source.y as f64 * scale_y).round() as usize;
+            let mw = ((preview_source.width as f64 * scale_x).round() as usize)
+                .max(1)
+                .min(active_working.width.saturating_sub(mx));
+            let mh = ((preview_source.height as f64 * scale_y).round() as usize)
+                .max(1)
+                .min(active_working.height.saturating_sub(my));
+            SampleRect::new(mx, my, mw, mh)
+        };
+
+        let Ok(sampled_dmin) =
+            crate::processing::analysis::sample_dmin_region(active_working, source_rect)
+        else {
+            self.selection_status = SelectionStatus::Clipped;
+            return None;
+        };
+
+        // Reject dark adapter mask rails (< 0.05 linear transmission)
+        if sampled_dmin[0] < 0.05 || sampled_dmin[1] < 0.05 || sampled_dmin[2] < 0.05 {
+            self.selection_status = SelectionStatus::TooDark;
+            return None;
+        }
+
+        self.dmin_rect = Some(preview_rect);
+        self.set_dmin(sampled_dmin);
+        self.selection_status = SelectionStatus::Valid;
+        Some(sampled_dmin)
+    }
+
     /// Recalculates downstream parameters that are in 'Auto' mode based on the current upstream parameters.
     pub fn recalculate_downstream(&mut self) {
         use crate::processing::analysis::sample_highlight_wb;
@@ -316,13 +456,21 @@ impl ReviewFrameState {
         color_pipeline: &ScannerColorPipeline,
     ) -> (usize, usize, &[u8]) {
         if self.cached_preview.is_none() {
+            let active_preview = if self.show_uncropped_master
+                && let Some(ref up) = self.uncropped_preview_image
+            {
+                up
+            } else {
+                &self.preview_image
+            };
+
             // Step 1 & 2: Ensure unoriented sRGB pixels of the preview image are available
             if self.cached_srgb.is_none() {
                 let prepared = self.params.prepare();
-                let mut positive_linear = vec![[0.0f32; 3]; self.preview_image.pixels.len()];
-                prepared.render_positive(&self.preview_image.pixels, &mut positive_linear);
+                let mut positive_linear = vec![[0.0f32; 3]; active_preview.pixels.len()];
+                prepared.render_positive(&active_preview.pixels, &mut positive_linear);
 
-                let mut srgb = vec![[0u8; 3]; self.preview_image.pixels.len()];
+                let mut srgb = vec![[0u8; 3]; active_preview.pixels.len()];
                 color_pipeline.bulk_working_to_display_srgb(&positive_linear, &mut srgb);
                 self.cached_srgb = Some(srgb);
             }
@@ -330,7 +478,7 @@ impl ReviewFrameState {
             let srgb = self.cached_srgb.as_ref().unwrap();
             let (pw, ph) = self
                 .orientation
-                .preview_dimensions(self.preview_image.width, self.preview_image.height);
+                .preview_dimensions(active_preview.width, active_preview.height);
 
             // Step 3: Transpose into oriented RGBA8 output
             let mut rgba = vec![255u8; pw * ph * 4];
@@ -340,10 +488,10 @@ impl ReviewFrameState {
                     let (sx, sy) = self.orientation.preview_to_source(
                         u,
                         v,
-                        self.preview_image.width,
-                        self.preview_image.height,
+                        active_preview.width,
+                        active_preview.height,
                     );
-                    let px = srgb[sy * self.preview_image.width + sx];
+                    let px = srgb[sy * active_preview.width + sx];
                     let idx = (row_offset + u) * 4;
                     rgba[idx] = px[0];
                     rgba[idx + 1] = px[1];
@@ -406,6 +554,8 @@ pub struct ReviewSession {
     pub roll: RollProfile,
     /// Default orientation scope for rotation controls.
     pub orientation_scope: OrientationScope,
+    /// Active canvas rectangle picker mode (`HighlightWb` vs `FilmBaseDmin`).
+    pub picker_mode: PickerMode,
     /// LittleCMS 2 color pipeline.
     pub color_pipeline: ScannerColorPipeline,
 }
@@ -422,8 +572,62 @@ impl ReviewSession {
             current_index: 0,
             roll,
             orientation_scope: OrientationScope::CurrentFrame,
+            picker_mode: PickerMode::HighlightWb,
             color_pipeline,
         }
+    }
+
+    /// Applies an empirical `D-min` calibration to the session's roll profile and all loaded frames.
+    pub fn apply_dmin_to_strip(&mut self, dmin: [f32; 3]) -> Result<(), RollProfileError> {
+        self.roll = self
+            .roll
+            .with_measured_dmin(dmin, Some("Calibrated in Review Studio".into()))?;
+        for frame in &mut self.frames {
+            frame.set_dmin(dmin);
+        }
+        Ok(())
+    }
+
+    /// Toggles `show_uncropped_master` on the active frame using the session's color pipeline.
+    pub fn set_current_show_uncropped_master(&mut self, show_uncropped: bool) {
+        if let Some(frame) = self.frames.get_mut(self.current_index) {
+            frame.set_show_uncropped_master(show_uncropped, &self.color_pipeline);
+        }
+    }
+
+    /// Applies a `D-min` selection rectangle on the active frame and updates the strip's `D-min`.
+    pub fn apply_current_dmin_selection(&mut self, sel: SampleRect) -> Option<[f32; 3]> {
+        let dmin = self
+            .frames
+            .get_mut(self.current_index)?
+            .apply_dmin_selection(sel, &self.color_pipeline)?;
+        let _ = self.apply_dmin_to_strip(dmin);
+        Some(dmin)
+    }
+
+    /// Automatically estimates `D-min` from the active frame's (or first available frame's)
+    /// unexposed overscan film gap and applies it across the entire strip.
+    pub fn auto_calibrate_strip_dmin_from_overscan(&mut self) -> Option<[f32; 3]> {
+        let estimated = self
+            .frames
+            .get(self.current_index)
+            .and_then(|f| f.source_artifact.as_ref())
+            .and_then(|a| {
+                crate::processing::analysis::estimate_dmin_from_overscan(a, &self.color_pipeline)
+            })
+            .or_else(|| {
+                self.frames
+                    .iter()
+                    .find_map(|f| f.source_artifact.as_ref())
+                    .and_then(|a| {
+                        crate::processing::analysis::estimate_dmin_from_overscan(
+                            a,
+                            &self.color_pipeline,
+                        )
+                    })
+            })?;
+        self.apply_dmin_to_strip(estimated).ok()?;
+        Some(estimated)
     }
 
     /// Initializes a review session from prepared scan frames.
@@ -471,6 +675,9 @@ impl ReviewSession {
 
     /// Appends a newly scanned prepared frame to this review session.
     pub fn add_prepared_frame(&mut self, p: PreparedFrame) -> Result<usize, ColorError> {
+        if !self.roll.is_calibrated() && p.roll.is_calibrated() {
+            self.roll = p.roll.clone();
+        }
         let working_image = match p.working_image {
             Some(img) => img,
             None => {
